@@ -38,6 +38,8 @@ install: install-kubectl install-kind install-helm
 	@helm version 2>/dev/null || echo "helm: インストール確認に失敗"
 
 # kubectlのインストール
+# Kubernetes公式ドキュメントの推奨インストール方法を使用
+# https://kubernetes.io/docs/tasks/tools/
 install-kubectl:
 	@echo "kubectlをインストールしています..."
 ifeq ($(UNAME_S),Darwin)
@@ -67,6 +69,8 @@ else
 endif
 
 # kindのインストール
+# kind公式ドキュメントの推奨インストール方法を使用
+# https://kind.sigs.k8s.io/docs/user/quick-start/
 install-kind:
 	@echo "kindをインストールしています..."
 ifeq ($(UNAME_S),Darwin)
@@ -95,6 +99,8 @@ else
 endif
 
 # helmのインストール
+# Helm公式ドキュメントの推奨インストール方法を使用
+# https://helm.sh/docs/intro/install/
 install-helm:
 	@echo "helmをインストールしています..."
 ifeq ($(UNAME_S),Darwin)
