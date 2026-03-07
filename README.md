@@ -60,6 +60,51 @@ make help
 make
 ```
 
+## Prometheus 監視環境のセットアップ
+
+### 監視環境の構築
+
+以下のコマンドで、kindクラスタの作成からPrometheus・Grafana・Alertmanagerのインストールまでを自動実行します。
+
+```bash
+make setup-monitoring
+```
+
+実行内容:
+1. `monitoring` という名前のkindクラスタを作成
+2. クラスタの状態・ノードを確認
+3. `prometheus-community` Helmリポジトリを登録・更新
+4. `kube-prometheus-stack` (Prometheus / Grafana / Alertmanager) をインストール
+5. Podの起動状況をウォッチ表示 (すべてのPodが `Running` / `Completed` になるまで待機)
+
+### ブラウザからのアクセス
+
+Podがすべて起動したら、ポートフォワードを設定します。
+
+```bash
+make port-forward
+```
+
+| サービス | URL | 備考 |
+|---|---|---|
+| Prometheus | http://localhost:9090 | |
+| Grafana | http://localhost:3000 | デフォルト: admin / prom-operator |
+| Alertmanager | http://localhost:9093 | |
+
+ポートフォワードを停止するには:
+
+```bash
+make stop-port-forward
+```
+
+### 監視環境の削除
+
+実験が終わったら、以下でクラスタごと削除できます。
+
+```bash
+make teardown-monitoring
+```
+
 ## 各ツールについて
 
 ### kubectl

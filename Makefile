@@ -1,4 +1,5 @@
-.PHONY: help install install-kubectl install-kind install-helm check-os
+.PHONY: help install install-kubectl install-kind install-helm check-os \
+        setup-monitoring port-forward stop-port-forward teardown-monitoring
 
 # OSの判定
 UNAME_S := $(shell uname -s)
@@ -12,7 +13,13 @@ help:
 	@echo "  make install-kubectl - kubectlをインストール"
 	@echo "  make install-kind    - kindをインストール"
 	@echo "  make install-helm    - helmをインストール"
-	@echo "  make check-os        - 現在のOSを確認"
+	@echo "  make check-os           - 現在のOSを確認"
+	@echo ""
+	@echo "Prometheus 監視環境:"
+	@echo "  make setup-monitoring    - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール"
+	@echo "  make port-forward        - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
+	@echo "  make stop-port-forward   - ポートフォワードを停止"
+	@echo "  make teardown-monitoring - 監視用kindクラスタを削除"
 	@echo ""
 	@echo "検出されたOS: $(UNAME_S)"
 
@@ -125,3 +132,55 @@ else
 	@echo "エラー: サポートされていないOSです"
 	@exit 1
 endif
+
+# kindクラスタの作成とPrometheus/Grafana/Alertmanagerのインストール
+setup-monitoring:
+	@echo "監視用kindクラスタを作成しています..."
+	kind create cluster --name monitoring
+	@echo ""
+	@echo "クラスタの状態を確認しています..."
+	kubectl cluster-info --context kind-monitoring
+	kubectl get nodes
+	@echo ""
+	@echo "Helmリポジトリを登録・更新しています..."
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+	helm repo add stable https://charts.helm.sh/stable
+	helm repo update
+	@echo ""
+	@echo "Prometheus / Grafana / Alertmanager をインストールしています..."
+	helm upgrade --install mon prometheus-community/kube-prometheus-stack \
+		--namespace monitoring \
+		--create-namespace \
+		--set kubeStateMetrics.enabled=true \
+		--set nodeExporter.enabled=true
+	@echo ""
+	@echo "✓ インストールが完了しました"
+	@echo "すべてのPodが起動するまで待っています (タイムアウト: 5分)..."
+	kubectl wait --for=condition=Ready pod --all -n monitoring --timeout=300s
+
+# Prometheus / Grafana / Alertmanager へのポートフォワードを設定
+port-forward:
+	@echo "Prometheusへのポートフォワードを設定しています (http://localhost:9090)..."
+	kubectl port-forward svc/mon-kube-prometheus-stack-prometheus 9090:9090 -n monitoring &
+	@echo "Grafanaへのポートフォワードを設定しています (http://localhost:3000)..."
+	kubectl port-forward svc/mon-grafana 3000:80 -n monitoring &
+	@echo "Alertmanagerへのポートフォワードを設定しています (http://localhost:9093)..."
+	kubectl port-forward svc/mon-kube-prometheus-stack-alertmanager 9093:9093 -n monitoring &
+	@echo ""
+	@echo "✓ ポートフォワードの設定が完了しました"
+	@echo "  Prometheus:    http://localhost:9090"
+	@echo "  Grafana:       http://localhost:3000  (デフォルト: admin / prom-operator)"
+	@echo "  Alertmanager:  http://localhost:9093"
+	@echo ""
+	@echo "ポートフォワードを停止するには: make stop-port-forward"
+
+# ポートフォワードを停止
+stop-port-forward:
+	@echo "ポートフォワードを停止しています..."
+	@pkill -f "kubectl port-forward svc/mon-" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
+
+# 監視用kindクラスタの削除
+teardown-monitoring:
+	@echo "監視用kindクラスタを削除しています..."
+	kind delete cluster --name monitoring
+	@echo "✓ クラスタの削除が完了しました"
