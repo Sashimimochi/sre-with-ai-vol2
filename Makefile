@@ -5,7 +5,7 @@ UNAME_S := $(shell uname -s)
 
 # デフォルトターゲット
 help:
-	@echo "SRE自動化ハンドブック Vol.2 - Chapter 2 セットアップ"
+	@echo "SRE自動化ハンドブック Vol.2 セットアップ"
 	@echo ""
 	@echo "使用可能なコマンド:"
 	@echo "  make install         - すべてのツールをインストール (kubectl, kind, helm)"
