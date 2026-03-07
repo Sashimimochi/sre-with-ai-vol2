@@ -1,5 +1,6 @@
 .PHONY: help install install-kubectl install-kind install-helm check-os \
-        setup-monitoring port-forward stop-port-forward teardown-monitoring
+        setup-monitoring port-forward stop-port-forward teardown-monitoring \
+        get-grafana-password
 
 # OSの判定
 UNAME_S := $(shell uname -s)
@@ -16,10 +17,11 @@ help:
 	@echo "  make check-os           - 現在のOSを確認"
 	@echo ""
 	@echo "Prometheus 監視環境:"
-	@echo "  make setup-monitoring    - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール"
-	@echo "  make port-forward        - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
-	@echo "  make stop-port-forward   - ポートフォワードを停止"
-	@echo "  make teardown-monitoring - 監視用kindクラスタを削除"
+	@echo "  make setup-monitoring      - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール"
+	@echo "  make port-forward          - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
+	@echo "  make stop-port-forward     - ポートフォワードを停止"
+	@echo "  make teardown-monitoring   - 監視用kindクラスタを削除"
+	@echo "  make get-grafana-password  - GrafanaのAdminパスワードを取得"
 	@echo ""
 	@echo "検出されたOS: $(UNAME_S)"
 
@@ -152,7 +154,8 @@ setup-monitoring:
 		--namespace monitoring \
 		--create-namespace \
 		--set kubeStateMetrics.enabled=true \
-		--set nodeExporter.enabled=true
+		--set nodeExporter.enabled=true \
+		--set grafana.adminPassword=prom-operator
 	@echo ""
 	@echo "✓ インストールが完了しました"
 	@echo "すべてのPodが起動するまで待っています (タイムアウト: 5分)..."
@@ -184,3 +187,8 @@ teardown-monitoring:
 	@echo "監視用kindクラスタを削除しています..."
 	kind delete cluster --name monitoring
 	@echo "✓ クラスタの削除が完了しました"
+
+# GrafanaのAdminパスワードを取得
+get-grafana-password:
+	@echo "GrafanaのAdminパスワードを取得しています..."
+	@kubectl get secret mon-grafana -n monitoring -o json | jq -r '.data."admin-password"' | base64 --decode ; echo

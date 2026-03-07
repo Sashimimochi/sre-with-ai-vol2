@@ -91,10 +91,20 @@ make port-forward
 | Grafana | http://localhost:3000 | デフォルト: admin / prom-operator |
 | Alertmanager | http://localhost:9093 | |
 
+> **ヒント**: パスワードを確認したい場合は `make get-grafana-password` で取得できます。
+
 ポートフォワードを停止するには:
 
 ```bash
 make stop-port-forward
+```
+
+### Grafanaパスワードの確認
+
+Kubernetesシークレットに保存されているパスワードを確認する場合は、以下のコマンドを使用します。
+
+```bash
+make get-grafana-password
 ```
 
 ### 監視環境の削除
