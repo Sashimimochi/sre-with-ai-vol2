@@ -180,7 +180,7 @@ stop-port-forward:
 	@pkill -f "kubectl port-forward svc/mon-" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
 
 # 監視用kindクラスタの削除
-teardown-monitoring:
+teardown-monitoring: stop-port-forward
 	@echo "監視用kindクラスタを削除しています..."
 	kind delete cluster --name monitoring
 	@echo "✓ クラスタの削除が完了しました"
