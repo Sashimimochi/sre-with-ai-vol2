@@ -67,6 +67,12 @@ make
 以下のコマンドで、kindクラスタの作成からPrometheus・Grafana・Alertmanagerのインストールまでを自動実行します。
 
 ```bash
+make setup
+```
+
+または監視環境専用のコマンドでも同じ操作が可能です：
+
+```bash
 make setup-monitoring
 ```
 
@@ -110,6 +116,12 @@ make get-grafana-password
 ### 監視環境の削除
 
 実験が終わったら、以下でクラスタごと削除できます。
+
+```bash
+make teardown
+```
+
+または監視環境専用のコマンドでも同じ操作が可能です：
 
 ```bash
 make teardown-monitoring
