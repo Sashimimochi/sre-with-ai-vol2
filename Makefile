@@ -1,4 +1,5 @@
 .PHONY: help install install-kubectl install-kind install-helm check-os \
+        setup teardown \
         setup-monitoring port-forward stop-port-forward teardown-monitoring \
         get-grafana-password
 
@@ -15,6 +16,10 @@ help:
 	@echo "  make install-kind    - kindをインストール"
 	@echo "  make install-helm    - helmをインストール"
 	@echo "  make check-os           - 現在のOSを確認"
+	@echo ""
+	@echo "汎用コマンド (現在は監視環境を操作します):"
+	@echo "  make setup                 - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール (setup-monitoringの別名)"
+	@echo "  make teardown              - kindクラスタを削除 (teardown-monitoringの別名)"
 	@echo ""
 	@echo "Prometheus 監視環境:"
 	@echo "  make setup-monitoring      - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール"
@@ -192,3 +197,8 @@ teardown-monitoring: stop-port-forward
 get-grafana-password:
 	@echo "GrafanaのAdminパスワードを取得しています..."
 	@kubectl get secret mon-grafana -n monitoring -o json | jq -r '.data."admin-password"' | base64 --decode ; echo
+
+# 汎用エイリアス: 将来的に監視環境以外のアプリケーションも対象にできるよう汎用名でも操作可能にする
+setup: setup-monitoring
+
+teardown: teardown-monitoring
