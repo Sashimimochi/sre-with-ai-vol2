@@ -1,0 +1,43 @@
+grafana:
+  adminPassword: prom-operator
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    secrets:
+      - alertmanager-slack-url
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: "slack-notifications"
+      routes:
+        - matchers:
+            - alertname = "Watchdog"
+          receiver: "default"
+    receivers:
+      - name: "default"
+      - name: "slack-notifications"
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-slack-url/slack_api_url
+            channel: "#alert-test"
+            send_resolved: true
+            username: "Alertmanager"
+            icon_emoji: ":bell:"
+            title: '[{{ .Status | toUpper }}] {{ if .CommonAnnotations.summary }}{{ .CommonAnnotations.summary }}{{ else }}N/A{{ end }}'
+            text: |
+              *説明*: {{ if .CommonAnnotations.description }}{{ .CommonAnnotations.description }}{{ else }}N/A{{ end }}
+              *アラート数*: {{ len .Alerts }}
+    inhibit_rules:
+      - source_matchers:
+          - severity = critical
+        target_matchers:
+          - severity =~ warning|info
+        equal: ["namespace", "alertname"]

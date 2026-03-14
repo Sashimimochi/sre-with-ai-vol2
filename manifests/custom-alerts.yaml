@@ -5,6 +5,7 @@ metadata:
   namespace: monitoring
   labels:
     prometheus: kube-prometheus
+    release: mon
 spec:
   groups:
     - name: custom.rules
