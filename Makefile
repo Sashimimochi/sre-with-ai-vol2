@@ -1,7 +1,7 @@
 .PHONY: help install install-kubectl install-kind install-helm check-os \
         setup teardown \
         setup-monitoring port-forward stop-port-forward teardown-monitoring \
-        get-grafana-password
+        get-grafana-password create-slack-secret
 
 # OSの判定
 UNAME_S := $(shell uname -s)
@@ -23,6 +23,7 @@ help:
 	@echo ""
 	@echo "Prometheus 監視環境:"
 	@echo "  make setup-monitoring      - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール"
+	@echo "  make create-slack-secret   - .envのWebhook URLをKubernetes Secretに登録"
 	@echo "  make port-forward          - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
 	@echo "  make stop-port-forward     - ポートフォワードを停止"
 	@echo "  make teardown-monitoring   - 監視用kindクラスタを削除"
@@ -140,6 +141,19 @@ else
 	@exit 1
 endif
 
+# Slack Webhook URLをKubernetes Secretに登録
+create-slack-secret:
+	@if [ ! -f .env ]; then \
+		echo "エラー: .envファイルが見つかりません。.env.exampleを参考に作成してください"; \
+		exit 1; \
+	fi
+	@echo "Slack Webhook URLをSecretに登録しています..."
+	kubectl create secret generic alertmanager-slack-url \
+		--from-env-file=.env \
+		--namespace monitoring \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "✓ Secretの登録が完了しました"
+
 # kindクラスタの作成とPrometheus/Grafana/Alertmanagerのインストール
 setup-monitoring:
 	@echo "監視用kindクラスタを作成しています..."
@@ -158,13 +172,13 @@ setup-monitoring:
 	helm upgrade --install mon prometheus-community/kube-prometheus-stack \
 		--namespace monitoring \
 		--create-namespace \
-		--set kubeStateMetrics.enabled=true \
-		--set nodeExporter.enabled=true \
-		--set grafana.adminPassword=prom-operator
+		-f prom-values.yaml
 	@echo ""
 	@echo "✓ インストールが完了しました"
 	@echo "すべてのPodが起動するまで待っています (タイムアウト: 5分)..."
 	kubectl wait --for=condition=Ready pod --all -n monitoring --timeout=300s
+	@echo ""
+	$(MAKE) create-slack-secret
 
 # Prometheus / Grafana / Alertmanager へのポートフォワードを設定
 port-forward:
