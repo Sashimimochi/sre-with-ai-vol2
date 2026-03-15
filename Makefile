@@ -254,7 +254,7 @@ setup-dify:
 # Dify へのポートフォワードを設定
 port-forward-dify:
 	@echo "Dify Web UIへのポートフォワードを設定しています (http://localhost:8080)..."
-	kubectl port-forward svc/dify-nginx 8080:80 -n dify &
+	kubectl port-forward -n dify svc/dify 8080:80 &
 	@echo ""
 	@echo "✓ ポートフォワードの設定が完了しました"
 	@echo "  Dify Web UI: http://localhost:8080"
@@ -264,7 +264,7 @@ port-forward-dify:
 # Dify のポートフォワードを停止
 stop-port-forward-dify:
 	@echo "Dify のポートフォワードを停止しています..."
-	@pkill -f "kubectl port-forward svc/dify-nginx" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
+	@pkill -f "kubectl port-forward.*svc/dify" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
 
 # Dify用kindクラスタの削除
 teardown-dify: stop-port-forward-dify
