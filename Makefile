@@ -37,8 +37,8 @@ endef
 # 指定したnamespaceのすべてのPodが起動するまで待つ
 # 使い方: $(call wait-for-pods,<namespace>)
 define wait-for-pods
-	@echo "すべてのPodが起動するまで待っています (タイムアウト: 5分)..."
-	kubectl wait --for=condition=Ready pod --all -n $(1) --timeout=300s
+	@echo "すべてのPodが起動するまで待っています (タイムアウト: 10分)..."
+	kubectl wait --for=condition=Ready pod --all -n $(1) --timeout=600s
 	@echo ""
 endef
 
