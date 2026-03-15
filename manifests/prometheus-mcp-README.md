@@ -8,9 +8,9 @@
 
 ## ファイル構成
 
-- `namespace.yaml`: mcp-servers namespaceの定義
-- `deployment.yaml`: prometheus-mcpサーバーのDeploymentリソース定義
-- `service.yaml`: prometheus-mcpサーバーのServiceリソース定義
+- `prometheus-mcp-namespace.yaml`: mcp-servers namespaceの定義
+- `prometheus-mcp-deployment.yaml`: prometheus-mcpサーバーのDeploymentリソース定義
+- `prometheus-mcp-service.yaml`: prometheus-mcpサーバーのServiceリソース定義
 
 ## デプロイ方法
 
@@ -22,23 +22,18 @@
 
 ### デプロイ手順
 
-すべてのマニフェストを一度に適用する場合:
+すべてのPrometheus MCPマニフェストを適用する場合:
 
 ```bash
-kubectl apply -f chap4/manifests/
+kubectl apply -f manifests/prometheus-mcp-namespace.yaml
+kubectl apply -f manifests/prometheus-mcp-deployment.yaml
+kubectl apply -f manifests/prometheus-mcp-service.yaml
 ```
 
-個別に適用する場合:
+または、まとめて適用:
 
 ```bash
-# Namespaceの作成
-kubectl apply -f chap4/manifests/namespace.yaml
-
-# Deploymentの作成
-kubectl apply -f chap4/manifests/deployment.yaml
-
-# Serviceの作成
-kubectl apply -f chap4/manifests/service.yaml
+kubectl apply -f manifests/prometheus-mcp-*.yaml
 ```
 
 ### デプロイの確認
@@ -58,7 +53,7 @@ kubectl get deployment -n mcp-servers
 
 ### Prometheus URLの変更
 
-Prometheus URLを変更する場合は、`deployment.yaml`の以下の部分を編集してください:
+Prometheus URLを変更する場合は、`prometheus-mcp-deployment.yaml`の以下の部分を編集してください:
 
 ```yaml
 env:
@@ -94,7 +89,7 @@ env:
 
 ### リソース制限の調整
 
-環境に応じて、`deployment.yaml`のresourcesセクションを調整してください:
+環境に応じて、`prometheus-mcp-deployment.yaml`のresourcesセクションを調整してください:
 
 ```yaml
 resources:
@@ -129,8 +124,8 @@ kubectl describe pod -n mcp-servers -l app=prometheus-mcp
 | 環境変数 | 説明 | デフォルト値 | 必須 |
 |---------|------|------------|------|
 | `PROMETHEUS_URL` | PrometheusサーバーのURL | なし | Yes |
-| `PROMETHEUS_MCP_SERVER_TRANSPORT` | トランスポートモード (stdio/http/sse) | stdio | No |
-| `PROMETHEUS_MCP_BIND_HOST` | HTTPトランスポート時のバインドホスト | 127.0.0.1 | No |
+| `PROMETHEUS_MCP_SERVER_TRANSPORT` | トランスポートモード (stdio/http/sse) | http | No |
+| `PROMETHEUS_MCP_BIND_HOST` | HTTPトランスポート時のバインドホスト | 0.0.0.0 | No |
 | `PROMETHEUS_MCP_BIND_PORT` | HTTPトランスポート時のポート | 8080 | No |
 | `PROMETHEUS_USERNAME` | Basic認証のユーザー名 | なし | No |
 | `PROMETHEUS_PASSWORD` | Basic認証のパスワード | なし | No |
