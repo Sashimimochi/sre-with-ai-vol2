@@ -60,32 +60,71 @@ make help
 make
 ```
 
+## クラスタ設計方針
+
+### ローカル (kind) 環境
+
+monitoring と Dify は **同一の kind クラスタ** (`kind-local`) に異なる Namespace (`monitoring` / `dify`) で共存させます。
+
+| コンポーネント | Namespace |
+|---|---|
+| Prometheus / Grafana / Alertmanager | `monitoring` |
+| Dify | `dify` |
+
+**同一クラスタを採用した理由:**
+- ローカルマシンのリソースを節約できる (kind クラスタはそれぞれ Docker コンテナを消費する)
+- Prometheus が Dify の Pod メトリクスを同一クラスタ内で直接スクレイプできる
+- 単一の kubectl コンテキストで全コンポーネントを操作できる
+
+クラスタ名は `CLUSTER_NAME` 変数で上書きできます:
+
+```bash
+# 例: 別の名前でクラスタを作成したい場合
+CLUSTER_NAME=my-cluster make setup
+```
+
+### クラウド環境での運用 (将来の対応)
+
+クラウド (EKS / GKE / AKS 等) では用途やチームに応じて柔軟に選択できます:
+
+| 構成 | 適用場面 |
+|---|---|
+| 同一クラスタ・別 Namespace | リソース共有を優先する小規模環境 |
+| 別クラスタ | セキュリティ分離・独立スケールが必要な本番環境 |
+
+Makefile の `CLUSTER_NAME` 変数と各 `setup-*` ターゲットはどちらの構成にも対応できる設計になっています。
+
 ## Prometheus 監視環境のセットアップ
 
-### 監視環境の構築
+### 全コンポーネントの一括構築
 
-以下のコマンドで、kindクラスタの作成からPrometheus・Grafana・Alertmanagerのインストールまでを自動実行します。
+monitoring と Dify を一度に構築するには:
 
 ```bash
 make setup
 ```
 
-または監視環境専用のコマンドでも同じ操作が可能です：
+実行内容:
+1. デフォルト名 `local` の kind クラスタを作成 (既に存在する場合はスキップ)
+2. Prometheus / Grafana / Alertmanager をインストール (`monitoring` namespace)
+3. Dify をインストール (`dify` namespace)
+
+### 監視環境のみ構築
 
 ```bash
 make setup-monitoring
 ```
 
 実行内容:
-1. `monitoring` という名前のkindクラスタを作成
+1. デフォルト名 `local` の kind クラスタを作成 (既に存在する場合はスキップ)
 2. クラスタの状態・ノードを確認
 3. `prometheus-community` Helmリポジトリを登録・更新
 4. `kube-prometheus-stack` (Prometheus / Grafana / Alertmanager) をインストール
-5. Podの起動状況をウォッチ表示 (すべてのPodが `Running` / `Completed` になるまで待機)
+5. Podの起動を待機
 
 ### ブラウザからのアクセス
 
-Podがすべて起動したら、ポートフォワードを設定します。
+すべてのサービス (Prometheus / Grafana / Alertmanager / Dify) のポートフォワードを一度に設定するには:
 
 ```bash
 make port-forward
@@ -96,10 +135,17 @@ make port-forward
 | Prometheus | http://localhost:9090 | |
 | Grafana | http://localhost:3000 | デフォルト: admin / prom-operator |
 | Alertmanager | http://localhost:9093 | |
+| Dify Web UI | http://localhost:8080 | |
+
+監視系のみポートフォワードしたい場合:
+
+```bash
+make port-forward-monitoring
+```
 
 > **ヒント**: パスワードを確認したい場合は `make get-grafana-password` で取得できます。
 
-ポートフォワードを停止するには:
+ポートフォワードをすべて停止するには:
 
 ```bash
 make stop-port-forward
@@ -113,18 +159,75 @@ Kubernetesシークレットに保存されているパスワードを確認す�
 make get-grafana-password
 ```
 
-### 監視環境の削除
+### 監視コンポーネントの削除
 
-実験が終わったら、以下でクラスタごと削除できます。
+監視コンポーネント (Prometheus/Grafana/Alertmanager) のみを削除してクラスタを維持する場合:
+
+```bash
+make teardown-monitoring
+```
+
+クラスタ全体を削除する場合 (Dify を含む全コンポーネントも削除されます):
 
 ```bash
 make teardown
 ```
 
-または監視環境専用のコマンドでも同じ操作が可能です：
+## Dify 環境のセットアップ
+
+[Dify](https://dify.ai/) は LLM アプリケーション開発プラットフォームです。
+Helm チャートは [BorisPolonsky/dify-helm](https://github.com/BorisPolonsky/dify-helm) を使用します。
+
+### Dify のインストール
 
 ```bash
-make teardown-monitoring
+make setup-dify
+```
+
+実行内容:
+1. デフォルト名 `local` の kind クラスタを作成 (既に存在する場合はスキップ)
+2. `dify` Helm リポジトリを登録・更新
+3. `dify/dify` Helm チャートを `dify` Namespace にインストール (`dify-values.yaml` の設定を適用)
+4. Pod の起動を待機
+
+### ブラウザからのアクセス
+
+すべてのサービスのポートフォワードを一度に設定するには (`make port-forward` でも可):
+
+```bash
+make port-forward-dify
+```
+
+| サービス | URL |
+|---|---|
+| Dify Web UI | http://localhost:8080 |
+
+Dify のみのポートフォワードを停止するには:
+
+```bash
+make stop-port-forward-dify
+```
+
+### Dify コンポーネントの削除
+
+Dify のみを削除してクラスタを維持する場合:
+
+```bash
+make teardown-dify
+```
+
+### クラスタ全体の削除
+
+monitoring と Dify をすべて含めてクラスタごと削除する場合:
+
+```bash
+make teardown
+```
+
+または:
+
+```bash
+make teardown-all
 ```
 
 ## 各ツールについて

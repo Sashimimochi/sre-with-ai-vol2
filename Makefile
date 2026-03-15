@@ -1,10 +1,46 @@
 .PHONY: help install install-kubectl install-kind install-helm check-os \
-        setup teardown \
-        setup-monitoring port-forward stop-port-forward teardown-monitoring \
-        get-grafana-password create-slack-secret
+        setup teardown teardown-all \
+        setup-monitoring port-forward-monitoring stop-port-forward-monitoring teardown-monitoring \
+        get-grafana-password create-slack-secret \
+        setup-dify port-forward-dify stop-port-forward-dify teardown-dify \
+        port-forward stop-port-forward
 
 # OSの判定
 UNAME_S := $(shell uname -s)
+
+# ローカル共有クラスタ名 (monitoring と dify を同じクラスタに収容)
+# クラウド等で別クラスタを使いたい場合は環境変数で上書き可能:
+#   CLUSTER_NAME=my-cluster make setup-monitoring
+CLUSTER_NAME ?= local
+
+# ============================================================
+# 共通処理定義
+# ============================================================
+
+# kindクラスタを作成してクラスタの状態を確認する
+# 既にクラスタが存在する場合はスキップして再利用する (冪等)
+# 使い方: $(call create-kind-cluster,<クラスタ名>)
+define create-kind-cluster
+	@if kind get clusters 2>/dev/null | grep -q "^$(1)$$"; then \
+		echo "kindクラスタ '$(1)' は既に存在しています。既存クラスタを使用します。"; \
+	else \
+		echo "kindクラスタを作成しています ($(1))..."; \
+		kind create cluster --name $(1); \
+	fi
+	@echo ""
+	@echo "クラスタの状態を確認しています..."
+	kubectl cluster-info --context kind-$(1)
+	kubectl get nodes
+	@echo ""
+endef
+
+# 指定したnamespaceのすべてのPodが起動するまで待つ
+# 使い方: $(call wait-for-pods,<namespace>)
+define wait-for-pods
+	@echo "すべてのPodが起動するまで待っています (タイムアウト: 10分)..."
+	kubectl wait --for=condition=Ready pod --all -n $(1) --timeout=600s
+	@echo ""
+endef
 
 # デフォルトターゲット
 help:
@@ -15,19 +51,32 @@ help:
 	@echo "  make install-kubectl - kubectlをインストール"
 	@echo "  make install-kind    - kindをインストール"
 	@echo "  make install-helm    - helmをインストール"
-	@echo "  make check-os           - 現在のOSを確認"
+	@echo "  make check-os        - 現在のOSを確認"
 	@echo ""
-	@echo "汎用コマンド (現在は監視環境を操作します):"
-	@echo "  make setup                 - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール (setup-monitoringの別名)"
-	@echo "  make teardown              - kindクラスタを削除 (teardown-monitoringの別名)"
+	@echo "汎用コマンド:"
+	@echo "  make setup                 - kindクラスタを作成しPrometheus/Grafana/Alertmanager + Difyをインストール"
+	@echo "  make port-forward          - すべてのサービス (Prometheus/Grafana/Alertmanager/Dify) へポートフォワード"
+	@echo "  make stop-port-forward     - すべてのポートフォワードを停止"
+	@echo "  make teardown              - すべてのコンポーネントとkindクラスタを削除 (teardown-allの別名)"
 	@echo ""
 	@echo "Prometheus 監視環境:"
 	@echo "  make setup-monitoring      - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール"
 	@echo "  make create-slack-secret   - .envのWebhook URLをKubernetes Secretに登録"
-	@echo "  make port-forward          - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
-	@echo "  make stop-port-forward     - ポートフォワードを停止"
-	@echo "  make teardown-monitoring   - 監視用kindクラスタを削除"
+	@echo "  make port-forward-monitoring - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
+	@echo "  make stop-port-forward-monitoring - 監視系ポートフォワードを停止"
+	@echo "  make teardown-monitoring   - 監視コンポーネントを削除 (クラスタは維持)"
 	@echo "  make get-grafana-password  - GrafanaのAdminパスワードを取得"
+	@echo ""
+	@echo "Dify 環境:"
+	@echo "  make setup-dify            - kindクラスタを作成しDifyをインストール"
+	@echo "  make port-forward-dify     - Dify Web UI(8080)へポートフォワード"
+	@echo "  make stop-port-forward-dify - Difyのポートフォワードを停止"
+	@echo "  make teardown-dify         - Difyコンポーネントを削除 (クラスタは維持)"
+	@echo ""
+	@echo "クラスタ管理:"
+	@echo "  make teardown-all          - すべてのポートフォワードを停止してkindクラスタを削除"
+	@echo ""
+	@echo "共有クラスタ名: $(CLUSTER_NAME)  (CLUSTER_NAME=<名前> で上書き可能)"
 	@echo ""
 	@echo "検出されたOS: $(UNAME_S)"
 
@@ -156,13 +205,7 @@ create-slack-secret:
 
 # kindクラスタの作成とPrometheus/Grafana/Alertmanagerのインストール
 setup-monitoring:
-	@echo "監視用kindクラスタを作成しています..."
-	kind create cluster --name monitoring
-	@echo ""
-	@echo "クラスタの状態を確認しています..."
-	kubectl cluster-info --context kind-monitoring
-	kubectl get nodes
-	@echo ""
+	$(call create-kind-cluster,$(CLUSTER_NAME))
 	@echo "Helmリポジトリを登録・更新しています..."
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 	helm repo add stable https://charts.helm.sh/stable
@@ -175,13 +218,11 @@ setup-monitoring:
 		-f prom-values.yaml
 	@echo ""
 	@echo "✓ インストールが完了しました"
-	@echo "すべてのPodが起動するまで待っています (タイムアウト: 5分)..."
-	kubectl wait --for=condition=Ready pod --all -n monitoring --timeout=300s
-	@echo ""
+	$(call wait-for-pods,monitoring)
 	$(MAKE) create-slack-secret
 
 # Prometheus / Grafana / Alertmanager へのポートフォワードを設定
-port-forward:
+port-forward-monitoring:
 	@echo "Prometheusへのポートフォワードを設定しています (http://localhost:9090)..."
 	kubectl port-forward svc/mon-kube-prometheus-stack-prometheus 9090:9090 -n monitoring &
 	@echo "Grafanaへのポートフォワードを設定しています (http://localhost:3000)..."
@@ -194,25 +235,84 @@ port-forward:
 	@echo "  Grafana:       http://localhost:3000  (デフォルト: admin / prom-operator)"
 	@echo "  Alertmanager:  http://localhost:9093"
 	@echo ""
-	@echo "ポートフォワードを停止するには: make stop-port-forward"
+	@echo "ポートフォワードを停止するには: make stop-port-forward-monitoring"
 
-# ポートフォワードを停止
-stop-port-forward:
-	@echo "ポートフォワードを停止しています..."
+# 監視系ポートフォワードを停止
+stop-port-forward-monitoring:
+	@echo "監視系ポートフォワードを停止しています..."
 	@pkill -f "kubectl port-forward svc/mon-" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
 
 # 監視用kindクラスタの削除
-teardown-monitoring: stop-port-forward
-	@echo "監視用kindクラスタを削除しています..."
-	kind delete cluster --name monitoring
-	@echo "✓ クラスタの削除が完了しました"
+teardown-monitoring: stop-port-forward-monitoring
+	@echo "監視コンポーネントを削除しています..."
+	helm uninstall mon --namespace monitoring 2>/dev/null || echo "監視用Helmリリース (mon) が見つかりませんでした"
+	kubectl delete namespace monitoring --ignore-not-found=true
+	@echo "✓ 監視コンポーネントの削除が完了しました (クラスタは維持されています)"
 
 # GrafanaのAdminパスワードを取得
 get-grafana-password:
 	@echo "GrafanaのAdminパスワードを取得しています..."
 	@kubectl get secret mon-grafana -n monitoring -o json | jq -r '.data."admin-password"' | base64 --decode ; echo
 
-# 汎用エイリアス: 将来的に監視環境以外のアプリケーションも対象にできるよう汎用名でも操作可能にする
-setup: setup-monitoring
+# kindクラスタの作成とDifyのインストール
+setup-dify:
+	$(call create-kind-cluster,$(CLUSTER_NAME))
+	@echo "Helmリポジトリを登録・更新しています..."
+	helm repo add dify https://borispolonsky.github.io/dify-helm
+	helm repo update
+	@echo ""
+	@echo "Dify をインストールしています..."
+	helm upgrade --install dify dify/dify \
+		--namespace dify \
+		--create-namespace \
+		-f dify-values.yaml
+	@echo ""
+	@echo "✓ インストールが完了しました"
+	$(call wait-for-pods,dify)
 
-teardown: teardown-monitoring
+# Dify へのポートフォワードを設定
+port-forward-dify:
+	@echo "Dify Web UIへのポートフォワードを設定しています (http://localhost:8080)..."
+	kubectl port-forward -n dify svc/dify 8080:80 &
+	@echo ""
+	@echo "✓ ポートフォワードの設定が完了しました"
+	@echo "  Dify Web UI: http://localhost:8080"
+	@echo ""
+	@echo "ポートフォワードを停止するには: make stop-port-forward-dify"
+
+# Dify のポートフォワードを停止
+stop-port-forward-dify:
+	@echo "Dify のポートフォワードを停止しています..."
+	@pkill -f "kubectl port-forward.*svc/dify" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
+
+# Dify用kindクラスタの削除
+teardown-dify: stop-port-forward-dify
+	@echo "Difyコンポーネントを削除しています..."
+	helm uninstall dify --namespace dify 2>/dev/null || echo "Dify用Helmリリース (dify) が見つかりませんでした"
+	kubectl delete namespace dify --ignore-not-found=true
+	@echo "✓ Difyコンポーネントの削除が完了しました (クラスタは維持されています)"
+
+# 汎用コマンド: monitoring と Dify を一度に構築する
+setup: setup-monitoring setup-dify
+
+# すべてのサービスへのポートフォワードを一度に設定する
+port-forward: port-forward-monitoring port-forward-dify
+	@echo ""
+	@echo "✓ すべてのポートフォワードの設定が完了しました"
+	@echo "  Prometheus:    http://localhost:9090"
+	@echo "  Grafana:       http://localhost:3000  (デフォルト: admin / prom-operator)"
+	@echo "  Alertmanager:  http://localhost:9093"
+	@echo "  Dify Web UI:   http://localhost:8080"
+	@echo ""
+	@echo "ポートフォワードを停止するには: make stop-port-forward"
+
+# すべてのポートフォワードを停止する
+stop-port-forward: stop-port-forward-monitoring stop-port-forward-dify
+
+# クラスタ全体を削除する (すべてのコンポーネントのポートフォワードを停止してからクラスタを削除)
+teardown-all: stop-port-forward
+	@echo "ローカルkindクラスタを削除しています ($(CLUSTER_NAME))..."
+	kind delete cluster --name $(CLUSTER_NAME)
+	@echo "✓ クラスタの削除が完了しました"
+
+teardown: teardown-all

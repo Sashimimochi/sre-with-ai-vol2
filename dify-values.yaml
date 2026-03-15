@@ -1,0 +1,39 @@
+# ローカル(kind)環境用の最小限の設定
+# サービスタイプをNodePortに変更してkind外からアクセス可能にする
+service:
+  type: NodePort
+
+# 本番環境ではIngressを使うが、kind環境では無効化
+ingress:
+  enabled: false
+
+# 必要に応じてリソース制限を調整
+api:
+  resources:
+    requests:
+      cpu: '500m'
+      memory: '512Mi'
+    limits:
+      cpu: '1000m'
+      memory: '1Gi'
+  # ローカル(kind)環境: local-path provisioner は RWO のみサポート
+  # クラウド環境(EFS/GCS/Azure Files等)に移行する際は ReadWriteMany に変更すること
+  persistence:
+    persistentVolumeClaim:
+      accessModes: ReadWriteOnce
+
+worker:
+  resources:
+    requests:
+      cpu: '500m'
+      memory: '512Mi'
+    limits:
+      cpu: '1000m'
+      memory: '1Gi'
+
+# ローカル(kind)環境: local-path provisioner は RWO のみサポート
+# クラウド環境に移行する際は ReadWriteMany に変更すること
+pluginDaemon:
+  persistence:
+    persistentVolumeClaim:
+      accessModes: ReadWriteOnce
