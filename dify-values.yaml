@@ -16,6 +16,11 @@ api:
     limits:
       cpu: '1000m'
       memory: '1Gi'
+  # ローカル(kind)環境: local-path provisioner は RWO のみサポート
+  # クラウド環境(EFS/GCS/Azure Files等)に移行する際は ReadWriteMany に変更すること
+  persistence:
+    persistentVolumeClaim:
+      accessModes: ReadWriteOnce
 
 worker:
   resources:
@@ -25,3 +30,10 @@ worker:
     limits:
       cpu: '1000m'
       memory: '1Gi'
+
+# ローカル(kind)環境: local-path provisioner は RWO のみサポート
+# クラウド環境に移行する際は ReadWriteMany に変更すること
+pluginDaemon:
+  persistence:
+    persistentVolumeClaim:
+      accessModes: ReadWriteOnce
