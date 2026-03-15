@@ -1,5 +1,5 @@
 .PHONY: help install install-kubectl install-kind install-helm check-os \
-        setup teardown \
+        setup teardown teardown-all \
         setup-monitoring port-forward stop-port-forward teardown-monitoring \
         get-grafana-password create-slack-secret \
         setup-dify port-forward-dify stop-port-forward-dify teardown-dify
@@ -7,15 +7,25 @@
 # OSの判定
 UNAME_S := $(shell uname -s)
 
+# ローカル共有クラスタ名 (monitoring と dify を同じクラスタに収容)
+# クラウド等で別クラスタを使いたい場合は環境変数で上書き可能:
+#   CLUSTER_NAME=my-cluster make setup-monitoring
+CLUSTER_NAME ?= local
+
 # ============================================================
 # 共通処理定義
 # ============================================================
 
 # kindクラスタを作成してクラスタの状態を確認する
+# 既にクラスタが存在する場合はスキップして再利用する (冪等)
 # 使い方: $(call create-kind-cluster,<クラスタ名>)
 define create-kind-cluster
-	@echo "kindクラスタを作成しています ($(1))..."
-	kind create cluster --name $(1)
+	@if kind get clusters 2>/dev/null | grep -q "^$(1)$$"; then \
+		echo "kindクラスタ '$(1)' は既に存在しています。既存クラスタを使用します。"; \
+	else \
+		echo "kindクラスタを作成しています ($(1))..."; \
+		kind create cluster --name $(1); \
+	fi
 	@echo ""
 	@echo "クラスタの状態を確認しています..."
 	kubectl cluster-info --context kind-$(1)
@@ -44,21 +54,26 @@ help:
 	@echo ""
 	@echo "汎用コマンド (現在は監視環境を操作します):"
 	@echo "  make setup                 - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール (setup-monitoringの別名)"
-	@echo "  make teardown              - kindクラスタを削除 (teardown-monitoringの別名)"
+	@echo "  make teardown              - すべてのコンポーネントとkindクラスタを削除 (teardown-allの別名)"
 	@echo ""
 	@echo "Prometheus 監視環境:"
 	@echo "  make setup-monitoring      - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール"
 	@echo "  make create-slack-secret   - .envのWebhook URLをKubernetes Secretに登録"
 	@echo "  make port-forward          - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
 	@echo "  make stop-port-forward     - ポートフォワードを停止"
-	@echo "  make teardown-monitoring   - 監視用kindクラスタを削除"
+	@echo "  make teardown-monitoring   - 監視コンポーネントを削除 (クラスタは維持)"
 	@echo "  make get-grafana-password  - GrafanaのAdminパスワードを取得"
 	@echo ""
 	@echo "Dify 環境:"
 	@echo "  make setup-dify            - kindクラスタを作成しDifyをインストール"
 	@echo "  make port-forward-dify     - Dify Web UI(8080)へポートフォワード"
 	@echo "  make stop-port-forward-dify - Difyのポートフォワードを停止"
-	@echo "  make teardown-dify         - Dify用kindクラスタを削除"
+	@echo "  make teardown-dify         - Difyコンポーネントを削除 (クラスタは維持)"
+	@echo ""
+	@echo "クラスタ管理:"
+	@echo "  make teardown-all          - すべてのポートフォワードを停止してkindクラスタを削除"
+	@echo ""
+	@echo "共有クラスタ名: $(CLUSTER_NAME)  (CLUSTER_NAME=<名前> で上書き可能)"
 	@echo ""
 	@echo "検出されたOS: $(UNAME_S)"
 
@@ -187,7 +202,7 @@ create-slack-secret:
 
 # kindクラスタの作成とPrometheus/Grafana/Alertmanagerのインストール
 setup-monitoring:
-	$(call create-kind-cluster,monitoring)
+	$(call create-kind-cluster,$(CLUSTER_NAME))
 	@echo "Helmリポジトリを登録・更新しています..."
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 	helm repo add stable https://charts.helm.sh/stable
@@ -226,9 +241,10 @@ stop-port-forward:
 
 # 監視用kindクラスタの削除
 teardown-monitoring: stop-port-forward
-	@echo "監視用kindクラスタを削除しています..."
-	kind delete cluster --name monitoring
-	@echo "✓ クラスタの削除が完了しました"
+	@echo "監視コンポーネントを削除しています..."
+	helm uninstall mon --namespace monitoring 2>/dev/null || echo "監視用Helmリリース (mon) が見つかりませんでした"
+	kubectl delete namespace monitoring --ignore-not-found=true
+	@echo "✓ 監視コンポーネントの削除が完了しました (クラスタは維持されています)"
 
 # GrafanaのAdminパスワードを取得
 get-grafana-password:
@@ -237,7 +253,7 @@ get-grafana-password:
 
 # kindクラスタの作成とDifyのインストール
 setup-dify:
-	$(call create-kind-cluster,dify)
+	$(call create-kind-cluster,$(CLUSTER_NAME))
 	@echo "Helmリポジトリを登録・更新しています..."
 	helm repo add dify https://borispolonsky.github.io/dify-helm
 	helm repo update
@@ -268,11 +284,18 @@ stop-port-forward-dify:
 
 # Dify用kindクラスタの削除
 teardown-dify: stop-port-forward-dify
-	@echo "Dify用kindクラスタを削除しています..."
-	kind delete cluster --name dify
-	@echo "✓ クラスタの削除が完了しました"
+	@echo "Difyコンポーネントを削除しています..."
+	helm uninstall dify --namespace dify 2>/dev/null || echo "Dify用Helmリリース (dify) が見つかりませんでした"
+	kubectl delete namespace dify --ignore-not-found=true
+	@echo "✓ Difyコンポーネントの削除が完了しました (クラスタは維持されています)"
 
 # 汎用エイリアス: 将来的に監視環境以外のアプリケーションも対象にできるよう汎用名でも操作可能にする
 setup: setup-monitoring
 
-teardown: teardown-monitoring
+# クラスタ全体を削除する (すべてのコンポーネントのポートフォワードを停止してからクラスタを削除)
+teardown-all: stop-port-forward stop-port-forward-dify
+	@echo "ローカルkindクラスタを削除しています ($(CLUSTER_NAME))..."
+	kind delete cluster --name $(CLUSTER_NAME)
+	@echo "✓ クラスタの削除が完了しました"
+
+teardown: teardown-all
