@@ -1,10 +1,35 @@
 .PHONY: help install install-kubectl install-kind install-helm check-os \
         setup teardown \
         setup-monitoring port-forward stop-port-forward teardown-monitoring \
-        get-grafana-password create-slack-secret
+        get-grafana-password create-slack-secret \
+        setup-dify port-forward-dify stop-port-forward-dify teardown-dify
 
 # OSの判定
 UNAME_S := $(shell uname -s)
+
+# ============================================================
+# 共通処理定義
+# ============================================================
+
+# kindクラスタを作成してクラスタの状態を確認する
+# 使い方: $(call create-kind-cluster,<クラスタ名>)
+define create-kind-cluster
+	@echo "kindクラスタを作成しています ($(1))..."
+	kind create cluster --name $(1)
+	@echo ""
+	@echo "クラスタの状態を確認しています..."
+	kubectl cluster-info --context kind-$(1)
+	kubectl get nodes
+	@echo ""
+endef
+
+# 指定したnamespaceのすべてのPodが起動するまで待つ
+# 使い方: $(call wait-for-pods,<namespace>)
+define wait-for-pods
+	@echo "すべてのPodが起動するまで待っています (タイムアウト: 5分)..."
+	kubectl wait --for=condition=Ready pod --all -n $(1) --timeout=300s
+	@echo ""
+endef
 
 # デフォルトターゲット
 help:
@@ -15,7 +40,7 @@ help:
 	@echo "  make install-kubectl - kubectlをインストール"
 	@echo "  make install-kind    - kindをインストール"
 	@echo "  make install-helm    - helmをインストール"
-	@echo "  make check-os           - 現在のOSを確認"
+	@echo "  make check-os        - 現在のOSを確認"
 	@echo ""
 	@echo "汎用コマンド (現在は監視環境を操作します):"
 	@echo "  make setup                 - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール (setup-monitoringの別名)"
@@ -28,6 +53,12 @@ help:
 	@echo "  make stop-port-forward     - ポートフォワードを停止"
 	@echo "  make teardown-monitoring   - 監視用kindクラスタを削除"
 	@echo "  make get-grafana-password  - GrafanaのAdminパスワードを取得"
+	@echo ""
+	@echo "Dify 環境:"
+	@echo "  make setup-dify            - kindクラスタを作成しDifyをインストール"
+	@echo "  make port-forward-dify     - Dify Web UI(8080)へポートフォワード"
+	@echo "  make stop-port-forward-dify - Difyのポートフォワードを停止"
+	@echo "  make teardown-dify         - Dify用kindクラスタを削除"
 	@echo ""
 	@echo "検出されたOS: $(UNAME_S)"
 
@@ -156,13 +187,7 @@ create-slack-secret:
 
 # kindクラスタの作成とPrometheus/Grafana/Alertmanagerのインストール
 setup-monitoring:
-	@echo "監視用kindクラスタを作成しています..."
-	kind create cluster --name monitoring
-	@echo ""
-	@echo "クラスタの状態を確認しています..."
-	kubectl cluster-info --context kind-monitoring
-	kubectl get nodes
-	@echo ""
+	$(call create-kind-cluster,monitoring)
 	@echo "Helmリポジトリを登録・更新しています..."
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 	helm repo add stable https://charts.helm.sh/stable
@@ -175,9 +200,7 @@ setup-monitoring:
 		-f prom-values.yaml
 	@echo ""
 	@echo "✓ インストールが完了しました"
-	@echo "すべてのPodが起動するまで待っています (タイムアウト: 5分)..."
-	kubectl wait --for=condition=Ready pod --all -n monitoring --timeout=300s
-	@echo ""
+	$(call wait-for-pods,monitoring)
 	$(MAKE) create-slack-secret
 
 # Prometheus / Grafana / Alertmanager へのポートフォワードを設定
@@ -211,6 +234,43 @@ teardown-monitoring: stop-port-forward
 get-grafana-password:
 	@echo "GrafanaのAdminパスワードを取得しています..."
 	@kubectl get secret mon-grafana -n monitoring -o json | jq -r '.data."admin-password"' | base64 --decode ; echo
+
+# kindクラスタの作成とDifyのインストール
+setup-dify:
+	$(call create-kind-cluster,dify)
+	@echo "Helmリポジトリを登録・更新しています..."
+	helm repo add dify https://borispolonsky.github.io/dify-helm
+	helm repo update
+	@echo ""
+	@echo "Dify をインストールしています..."
+	helm upgrade --install dify dify/dify \
+		--namespace dify \
+		--create-namespace \
+		-f dify-values.yaml
+	@echo ""
+	@echo "✓ インストールが完了しました"
+	$(call wait-for-pods,dify)
+
+# Dify へのポートフォワードを設定
+port-forward-dify:
+	@echo "Dify Web UIへのポートフォワードを設定しています (http://localhost:8080)..."
+	kubectl port-forward svc/dify-nginx 8080:80 -n dify &
+	@echo ""
+	@echo "✓ ポートフォワードの設定が完了しました"
+	@echo "  Dify Web UI: http://localhost:8080"
+	@echo ""
+	@echo "ポートフォワードを停止するには: make stop-port-forward-dify"
+
+# Dify のポートフォワードを停止
+stop-port-forward-dify:
+	@echo "Dify のポートフォワードを停止しています..."
+	@pkill -f "kubectl port-forward svc/dify-nginx" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
+
+# Dify用kindクラスタの削除
+teardown-dify: stop-port-forward-dify
+	@echo "Dify用kindクラスタを削除しています..."
+	kind delete cluster --name dify
+	@echo "✓ クラスタの削除が完了しました"
 
 # 汎用エイリアス: 将来的に監視環境以外のアプリケーションも対象にできるよう汎用名でも操作可能にする
 setup: setup-monitoring
