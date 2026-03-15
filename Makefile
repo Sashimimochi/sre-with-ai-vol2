@@ -1,8 +1,9 @@
 .PHONY: help install install-kubectl install-kind install-helm check-os \
         setup teardown teardown-all \
-        setup-monitoring port-forward stop-port-forward teardown-monitoring \
+        setup-monitoring port-forward-monitoring stop-port-forward-monitoring teardown-monitoring \
         get-grafana-password create-slack-secret \
-        setup-dify port-forward-dify stop-port-forward-dify teardown-dify
+        setup-dify port-forward-dify stop-port-forward-dify teardown-dify \
+        port-forward stop-port-forward
 
 # OSの判定
 UNAME_S := $(shell uname -s)
@@ -52,15 +53,17 @@ help:
 	@echo "  make install-helm    - helmをインストール"
 	@echo "  make check-os        - 現在のOSを確認"
 	@echo ""
-	@echo "汎用コマンド (現在は監視環境を操作します):"
-	@echo "  make setup                 - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール (setup-monitoringの別名)"
+	@echo "汎用コマンド:"
+	@echo "  make setup                 - kindクラスタを作成しPrometheus/Grafana/Alertmanager + Difyをインストール"
+	@echo "  make port-forward          - すべてのサービス (Prometheus/Grafana/Alertmanager/Dify) へポートフォワード"
+	@echo "  make stop-port-forward     - すべてのポートフォワードを停止"
 	@echo "  make teardown              - すべてのコンポーネントとkindクラスタを削除 (teardown-allの別名)"
 	@echo ""
 	@echo "Prometheus 監視環境:"
 	@echo "  make setup-monitoring      - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール"
 	@echo "  make create-slack-secret   - .envのWebhook URLをKubernetes Secretに登録"
-	@echo "  make port-forward          - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
-	@echo "  make stop-port-forward     - ポートフォワードを停止"
+	@echo "  make port-forward-monitoring - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
+	@echo "  make stop-port-forward-monitoring - 監視系ポートフォワードを停止"
 	@echo "  make teardown-monitoring   - 監視コンポーネントを削除 (クラスタは維持)"
 	@echo "  make get-grafana-password  - GrafanaのAdminパスワードを取得"
 	@echo ""
@@ -219,7 +222,7 @@ setup-monitoring:
 	$(MAKE) create-slack-secret
 
 # Prometheus / Grafana / Alertmanager へのポートフォワードを設定
-port-forward:
+port-forward-monitoring:
 	@echo "Prometheusへのポートフォワードを設定しています (http://localhost:9090)..."
 	kubectl port-forward svc/mon-kube-prometheus-stack-prometheus 9090:9090 -n monitoring &
 	@echo "Grafanaへのポートフォワードを設定しています (http://localhost:3000)..."
@@ -232,15 +235,15 @@ port-forward:
 	@echo "  Grafana:       http://localhost:3000  (デフォルト: admin / prom-operator)"
 	@echo "  Alertmanager:  http://localhost:9093"
 	@echo ""
-	@echo "ポートフォワードを停止するには: make stop-port-forward"
+	@echo "ポートフォワードを停止するには: make stop-port-forward-monitoring"
 
-# ポートフォワードを停止
-stop-port-forward:
-	@echo "ポートフォワードを停止しています..."
+# 監視系ポートフォワードを停止
+stop-port-forward-monitoring:
+	@echo "監視系ポートフォワードを停止しています..."
 	@pkill -f "kubectl port-forward svc/mon-" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
 
 # 監視用kindクラスタの削除
-teardown-monitoring: stop-port-forward
+teardown-monitoring: stop-port-forward-monitoring
 	@echo "監視コンポーネントを削除しています..."
 	helm uninstall mon --namespace monitoring 2>/dev/null || echo "監視用Helmリリース (mon) が見つかりませんでした"
 	kubectl delete namespace monitoring --ignore-not-found=true
@@ -289,11 +292,25 @@ teardown-dify: stop-port-forward-dify
 	kubectl delete namespace dify --ignore-not-found=true
 	@echo "✓ Difyコンポーネントの削除が完了しました (クラスタは維持されています)"
 
-# 汎用エイリアス: 将来的に監視環境以外のアプリケーションも対象にできるよう汎用名でも操作可能にする
-setup: setup-monitoring
+# 汎用コマンド: monitoring と Dify を一度に構築する
+setup: setup-monitoring setup-dify
+
+# すべてのサービスへのポートフォワードを一度に設定する
+port-forward: port-forward-monitoring port-forward-dify
+	@echo ""
+	@echo "✓ すべてのポートフォワードの設定が完了しました"
+	@echo "  Prometheus:    http://localhost:9090"
+	@echo "  Grafana:       http://localhost:3000  (デフォルト: admin / prom-operator)"
+	@echo "  Alertmanager:  http://localhost:9093"
+	@echo "  Dify Web UI:   http://localhost:8080"
+	@echo ""
+	@echo "ポートフォワードを停止するには: make stop-port-forward"
+
+# すべてのポートフォワードを停止する
+stop-port-forward: stop-port-forward-monitoring stop-port-forward-dify
 
 # クラスタ全体を削除する (すべてのコンポーネントのポートフォワードを停止してからクラスタを削除)
-teardown-all: stop-port-forward stop-port-forward-dify
+teardown-all: stop-port-forward
 	@echo "ローカルkindクラスタを削除しています ($(CLUSTER_NAME))..."
 	kind delete cluster --name $(CLUSTER_NAME)
 	@echo "✓ クラスタの削除が完了しました"

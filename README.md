@@ -80,8 +80,7 @@ monitoring と Dify は **同一の kind クラスタ** (`kind-local`) に異な
 
 ```bash
 # 例: 別の名前でクラスタを作成したい場合
-CLUSTER_NAME=my-cluster make setup-monitoring
-CLUSTER_NAME=my-cluster make setup-dify
+CLUSTER_NAME=my-cluster make setup
 ```
 
 ### クラウド環境での運用 (将来の対応)
@@ -97,30 +96,35 @@ Makefile の `CLUSTER_NAME` 変数と各 `setup-*` ターゲットはどちら�
 
 ## Prometheus 監視環境のセットアップ
 
-### 監視環境の構築
+### 全コンポーネントの一括構築
 
-以下のコマンドで、kindクラスタの作成からPrometheus・Grafana・Alertmanagerのインストールまでを自動実行します。
+monitoring と Dify を一度に構築するには:
 
 ```bash
 make setup
 ```
 
-または監視環境専用のコマンドでも同じ操作が可能です：
+実行内容:
+1. デフォルト名 `local` の kind クラスタを作成 (既に存在する場合はスキップ)
+2. Prometheus / Grafana / Alertmanager をインストール (`monitoring` namespace)
+3. Dify をインストール (`dify` namespace)
+
+### 監視環境のみ構築
 
 ```bash
 make setup-monitoring
 ```
 
 実行内容:
-1. `monitoring` という名前のkindクラスタを作成
+1. デフォルト名 `local` の kind クラスタを作成 (既に存在する場合はスキップ)
 2. クラスタの状態・ノードを確認
 3. `prometheus-community` Helmリポジトリを登録・更新
 4. `kube-prometheus-stack` (Prometheus / Grafana / Alertmanager) をインストール
-5. Podの起動状況をウォッチ表示 (すべてのPodが `Running` / `Completed` になるまで待機)
+5. Podの起動を待機
 
 ### ブラウザからのアクセス
 
-Podがすべて起動したら、ポートフォワードを設定します。
+すべてのサービス (Prometheus / Grafana / Alertmanager / Dify) のポートフォワードを一度に設定するには:
 
 ```bash
 make port-forward
@@ -131,10 +135,17 @@ make port-forward
 | Prometheus | http://localhost:9090 | |
 | Grafana | http://localhost:3000 | デフォルト: admin / prom-operator |
 | Alertmanager | http://localhost:9093 | |
+| Dify Web UI | http://localhost:8080 | |
+
+監視系のみポートフォワードしたい場合:
+
+```bash
+make port-forward-monitoring
+```
 
 > **ヒント**: パスワードを確認したい場合は `make get-grafana-password` で取得できます。
 
-ポートフォワードを停止するには:
+ポートフォワードをすべて停止するには:
 
 ```bash
 make stop-port-forward
@@ -162,12 +173,6 @@ make teardown-monitoring
 make teardown
 ```
 
-または監視環境専用のコマンドでも同じ操作が可能です：
-
-```bash
-make teardown-monitoring
-```
-
 ## Dify 環境のセットアップ
 
 [Dify](https://dify.ai/) は LLM アプリケーション開発プラットフォームです。
@@ -187,7 +192,7 @@ make setup-dify
 
 ### ブラウザからのアクセス
 
-Pod がすべて起動したら、ポートフォワードを設定します。
+すべてのサービスのポートフォワードを一度に設定するには (`make port-forward` でも可):
 
 ```bash
 make port-forward-dify
@@ -197,7 +202,7 @@ make port-forward-dify
 |---|---|
 | Dify Web UI | http://localhost:8080 |
 
-ポートフォワードを停止するには:
+Dify のみのポートフォワードを停止するには:
 
 ```bash
 make stop-port-forward-dify
