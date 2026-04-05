@@ -37,3 +37,6 @@ pluginDaemon:
   persistence:
     persistentVolumeClaim:
       accessModes: ReadWriteOnce
+  extraEnvs:
+    - name: UV_INDEX_URL
+      value: "https://pypi.org/simple/"  # または国内ミラー

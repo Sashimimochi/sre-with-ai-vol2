@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chaos-script-config
+  namespace: monitoring
+data:
+  app.py: |
+    import time
+    import random
+    from prometheus_client import start_http_server, Gauge, Counter
+
+    # 既存のメトリクス
+    CPU_USAGE = Gauge('simulated_cpu_usage_percent', 'Simulated CPU usage percentage')
+    MEMORY_USAGE = Gauge('simulated_memory_usage_bytes', 'Simulated Memory usage in bytes')
+    DISK_IO = Gauge('simulated_disk_io_ops', 'Simulated Disk I/O operations per second')
+
+    # 新規追加：HTTPリクエスト（ステータスコード別）とネットワーク帯域
+    HTTP_REQUESTS = Counter('http_requests_total', 'Total HTTP requests', ['status', 'method', 'path'])
+    NET_TX = Counter('simulated_network_transmit_bytes_total', 'Simulated network transmit bytes')
+    NET_RX = Counter('simulated_network_receive_bytes_total', 'Simulated network receive bytes')
+
+    def simulate_behavior():
+        step = 0
+        while True:
+            # 90秒周期でフェーズを回す (30秒ごとに状態が変化)
+            phase = step % 9
+
+            # --- フェーズ1: 正常時 (30秒間) ---
+            if phase < 3:
+                CPU_USAGE.set(random.uniform(5, 12))
+                MEMORY_USAGE.set(500 * 1024 * 1024) # 500MB
+                DISK_IO.set(random.uniform(10, 30))
+
+                # HTTP 200がメイン、500はほぼ出ない
+                HTTP_REQUESTS.labels(status='200', method='GET', path='/api/v1/data').inc(random.randint(80, 120))
+                HTTP_REQUESTS.labels(status='500', method='GET', path='/api/v1/data').inc(random.randint(0, 1))
+
+                # ネットワーク帯域 (低負荷: 1-5MB/s相当の増分)
+                NET_TX.inc(random.randint(1, 5) * 1024 * 1024)
+                NET_RX.inc(random.randint(1, 5) * 1024 * 1024)
+
+            # --- フェーズ2: ネットワーク飽和 & HTTPエラー シナリオ (30秒間) ---
+            elif 3 <= phase < 6:
+                print("[WARN] Scenario: Network Saturation & HTTP Error Spike")
+                # CPUは微増 (分析結果の0.8->0.9コア相当を15-20%で表現)
+                CPU_USAGE.set(random.uniform(15, 20))
+                # メモリは33%増加 (2.1GB -> 2.8GB付近)
+                MEMORY_USAGE.set(random.uniform(2100, 2800) * 1024 * 1024)
+
+                # ネットワーク帯域が急増 (180MB/s相当の増分)
+                NET_TX.inc(random.randint(150, 200) * 1024 * 1024)
+                NET_RX.inc(random.randint(150, 200) * 1024 * 1024)
+
+                # HTTP 500エラー率が急上昇 (成功数が減り、失敗が増える)
+                HTTP_REQUESTS.labels(status='200', method='GET', path='/api/v1/data').inc(random.randint(10, 30))
+                HTTP_REQUESTS.labels(status='500', method='GET', path='/api/v1/data').inc(random.randint(50, 100))
+
+            # --- フェーズ3: その他の障害 (CPU/DISKスパイク or OOM) (30秒間) ---
+            else:
+                scenario = random.choice(['cpu_disk_spike', 'oom_error'])
+                if scenario == 'cpu_disk_spike':
+                    print("[WARN] Scenario: High CPU and Disk I/O spike")
+                    CPU_USAGE.set(random.uniform(85, 98))
+                    DISK_IO.set(random.uniform(800, 1200))
+                elif scenario == 'oom_error':
+                    print("[ERROR] Scenario: Potential OOM Situation")
+                    MEMORY_USAGE.set(3800 * 1024 * 1024) # 3.8GB
+                    CPU_USAGE.set(random.uniform(20, 35))
+                    print("[ERROR] kernel: Out of memory: Kill process 1234 (fake_app)")
+
+            step += 1
+            time.sleep(10) # 10秒ごとにメトリクス更新
+
+    if __name__ == '__main__':
+        start_http_server(8082)
+        print("Chaos Exporter: Advanced Scenario v2 started on port 8082")
+        simulate_behavior()

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-mcp
+  namespace: monitoring
+spec:
+  selector:
+    app: grafana-mcp
+  ports:
+  - port: 8081        # Difyからは引き続き8081でアクセス
+    targetPort: 8000  # Pod内の8000へ転送

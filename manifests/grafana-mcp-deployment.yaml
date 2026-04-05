@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana-mcp
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana-mcp
+  template:
+    metadata:
+      labels:
+        app: grafana-mcp
+    spec:
+      containers:
+      - name: mcp-server
+        image: mcp/grafana:latest
+        ports:
+        - name: http-mcp
+          containerPort: 8000  # 8080から8000に変更
+        env:
+        - name: MCP_PORT
+          value: "8000"        # 念のため8000を明示
+        - name: MCP_PORT
+          value: "8080"  # この環境変数でSSEサーバーが起動します
+        - name: GRAFANA_URL
+          value: "http://mon-grafana.monitoring.svc.cluster.local"
+        - name: GRAFANA_ORG_ID
+          value: "1"  # デフォルトの組織ID
+        - name: GRAFANA_SERVICE_ACCOUNT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: grafana-api-token
+              key: token
+        readinessProbe:
+          tcpSocket:
+            port: 8000         # 8000に変更
+        args: []
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"

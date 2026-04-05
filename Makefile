@@ -3,7 +3,8 @@
         setup-monitoring port-forward-monitoring stop-port-forward-monitoring teardown-monitoring \
         get-grafana-password create-slack-secret \
         setup-dify port-forward-dify stop-port-forward-dify teardown-dify \
-        port-forward stop-port-forward
+        setup-mcp port-forward-mcp stop-port-forward-mcp teardown-mcp \
+        port-forward stop-port-forward apply delete operator del-operator
 
 # OSの判定
 UNAME_S := $(shell uname -s)
@@ -12,6 +13,11 @@ UNAME_S := $(shell uname -s)
 # クラウド等で別クラスタを使いたい場合は環境変数で上書き可能:
 #   CLUSTER_NAME=my-cluster make setup-monitoring
 CLUSTER_NAME ?= local
+MONITOR_NAMESPACE=monitoring
+PROM_OPER_REL=mon
+ELASTIC_NAMESPACE="elastic-system"
+ELASTICSEARC_ENDPOINT=http://elastic.local
+ELASTIC_OPERATOR_VERSION=2.14.0
 
 # ============================================================
 # 共通処理定義
@@ -72,6 +78,12 @@ help:
 	@echo "  make port-forward-dify     - Dify Web UI(8080)へポートフォワード"
 	@echo "  make stop-port-forward-dify - Difyのポートフォワードを停止"
 	@echo "  make teardown-dify         - Difyコンポーネントを削除 (クラスタは維持)"
+	@echo ""
+	@echo "Prometheus MCP サーバー:"
+	@echo "  make setup-mcp             - Prometheus MCPサーバーをデプロイ (monitoring namespace)"
+	@echo "  make port-forward-mcp      - Prometheus MCPサーバー(9000)へポートフォワード"
+	@echo "  make stop-port-forward-mcp - MCPサーバーのポートフォワードを停止"
+	@echo "  make teardown-mcp          - MCPサーバーを削除 (クラスタは維持)"
 	@echo ""
 	@echo "クラスタ管理:"
 	@echo "  make teardown-all          - すべてのポートフォワードを停止してkindクラスタを削除"
@@ -218,7 +230,15 @@ setup-monitoring:
 		-f prom-values.yaml
 	@echo ""
 	@echo "✓ インストールが完了しました"
-	$(call wait-for-pods,monitoring)
+	@echo "Operator / Grafana / Alertmanager / Exporterの起動を待っています (タイムアウト: 15分)..."
+	kubectl wait --for=condition=Ready pod \
+		-l 'app.kubernetes.io/managed-by=Helm' \
+		-n monitoring --timeout=900s
+	@echo "PrometheusのStatefulSet Podの起動を待っています (タイムアウト: 15分)..."
+	kubectl wait --for=condition=Ready pod \
+		-l 'operator.prometheus.io/name=mon-kube-prometheus-stack-prometheus' \
+		-n monitoring --timeout=900s
+	@echo ""
 	$(MAKE) create-slack-secret
 
 # Prometheus / Grafana / Alertmanager へのポートフォワードを設定
@@ -292,22 +312,76 @@ teardown-dify: stop-port-forward-dify
 	kubectl delete namespace dify --ignore-not-found=true
 	@echo "✓ Difyコンポーネントの削除が完了しました (クラスタは維持されています)"
 
+# Prometheus MCPサーバーのデプロイ (monitoring namespace に統合)
+setup-mcp:
+	@echo "Prometheus MCP サーバーをデプロイしています..."
+	kubectl apply -f manifests/prometheus-mcp-deployment.yaml
+	kubectl apply -f manifests/prometheus-mcp-service.yaml
+	@echo ""
+	@echo "✓ デプロイが完了しました"
+	@echo "Prometheus MCP Podの起動を待っています (タイムアウト: 5分)..."
+	kubectl wait --for=condition=Ready pod \
+		-l app=prometheus-mcp \
+		-n monitoring --timeout=300s
+	@echo ""
+	@echo "Grafana MCP サーバーをデプロイしています..."
+	kubectl apply -f manifests/grafana-mcp-deployment.yaml
+	kubectl apply -f manifests/grafana-mcp-service.yaml
+	@echo ""
+	@echo "✓ デプロイが完了しました"
+	@echo "Grafana MCP Podの起動を待っています (タイムアウト: 5分)..."
+	kubectl wait --for=condition=Ready pod \
+		-l app=grafana-mcp \
+		-n monitoring --timeout=300s
+	@echo ""
+
+# Prometheus MCPサーバーへのポートフォワードを設定
+port-forward-mcp:
+	@echo "Prometheus MCPサーバーへのポートフォワードを設定しています (http://localhost:9000)..."
+	kubectl port-forward svc/prometheus-mcp 9000:9000 -n monitoring &
+	@echo "Prometheus MCPサーバーへのポートフォワードを設定しています (http://localhost:8081)..."
+	kubectl port-forward svc/grafana-mcp 8081:8081 -n monitoring &
+	@echo ""
+	@echo "✓ ポートフォワードの設定が完了しました"
+	@echo "  Prometheus MCP: http://localhost:9000/mcp"
+	@echo "  Grafana MCP:    http://localhost:8081/mcp"
+	@echo ""
+	@echo "ポートフォワードを停止するには: make stop-port-forward-mcp"
+
+# Prometheus MCPサーバーのポートフォワードを停止
+stop-port-forward-mcp:
+	@echo "Prometheus MCPサーバーのポートフォワードを停止しています..."
+	@pkill -f "kubectl port-forward svc/prometheus-mcp" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
+	@pkill -f "kubectl port-forward svc/grafana-mcp" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
+
+# Prometheus MCPサーバーを削除
+teardown-mcp: stop-port-forward-mcp
+	@echo "Prometheus MCP サーバーを削除しています..."
+	kubectl delete -f manifests/prometheus-mcp-service.yaml --ignore-not-found=true
+	kubectl delete -f manifests/prometheus-mcp-deployment.yaml --ignore-not-found=true
+	@echo "✓ Prometheus MCP サーバーの削除が完了しました"
+	@echo "Grafana MCP サーバーを削除しています..."
+	kubectl delete -f manifests/grafana-mcp-service.yaml --ignore-not-found=true
+	kubectl delete -f manifests/grafana-mcp-deployment.yaml --ignore-not-found=true
+	@echo "✓ Grafana MCP サーバーの削除が完了しました"
+
 # 汎用コマンド: monitoring と Dify を一度に構築する
-setup: setup-monitoring setup-dify
+setup: setup-monitoring setup-dify setup-mcp
 
 # すべてのサービスへのポートフォワードを一度に設定する
-port-forward: port-forward-monitoring port-forward-dify
+port-forward: port-forward-monitoring port-forward-dify port-forward-mcp
 	@echo ""
 	@echo "✓ すべてのポートフォワードの設定が完了しました"
-	@echo "  Prometheus:    http://localhost:9090"
-	@echo "  Grafana:       http://localhost:3000  (デフォルト: admin / prom-operator)"
-	@echo "  Alertmanager:  http://localhost:9093"
-	@echo "  Dify Web UI:   http://localhost:8080"
+	@echo "  Prometheus:     http://localhost:9090"
+	@echo "  Grafana:        http://localhost:3000  (デフォルト: admin / prom-operator)"
+	@echo "  Alertmanager:   http://localhost:9093"
+	@echo "  Dify Web UI:    http://localhost:8080"
+	@echo "  Prometheus MCP: http://localhost:9000/mcp"
 	@echo ""
 	@echo "ポートフォワードを停止するには: make stop-port-forward"
 
 # すべてのポートフォワードを停止する
-stop-port-forward: stop-port-forward-monitoring stop-port-forward-dify
+stop-port-forward: stop-port-forward-monitoring stop-port-forward-dify stop-port-forward-mcp
 
 # クラスタ全体を削除する (すべてのコンポーネントのポートフォワードを停止してからクラスタを削除)
 teardown-all: stop-port-forward
@@ -316,3 +390,48 @@ teardown-all: stop-port-forward
 	@echo "✓ クラスタの削除が完了しました"
 
 teardown: teardown-all
+
+
+operator:
+	kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+	kubectl wait --namespace ingress-nginx \
+  --for=condition=available \
+	deployment.apps/ingress-nginx-controller \
+  --timeout=90s
+	sleep 10
+	kubectl wait --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=90s
+	helm install elastic-operator elastic/eck-operator -n $(ELASTIC_NAMESPACE) --create-namespace --version $(ELASTIC_OPERATOR_VERSION)
+	kubectl wait --namespace $(ELASTIC_NAMESPACE) \
+  --for=condition=ready \
+	pod/elastic-operator-0 \
+  --timeout=90s
+
+del-operator:
+	helm delete elastic-operator -n $(ELASTIC_NAMESPACE)
+
+delete:
+	kubectl delete -f manifest/
+	helm uninstall elastic-exporter
+
+apply:
+	helm install fluentd fluent/fluentd -f fluent-values.yaml
+	kubectl apply -f manifests/elasticsearch/
+	sleep 60
+	kubectl wait --namespace $(ELASTIC_NAMESPACE) \
+  --for=condition=ready \
+	pod/quickstart-es-default-0 \
+  --timeout=2400s
+	helm install elastic-exporter prometheus-community/prometheus-elasticsearch-exporter -f elastic-exporter-values.yaml -n $(ELASTIC_NAMESPACE)
+
+password:
+	$(eval PASSWORD=`kubectl get secret quickstart-es-elastic-user -n $(ELASTIC_NAMESPACE) -o go-template='{{.data.elastic | base64decode}}'`)
+	echo $(PASSWORD)
+
+healthcheck:
+	curl -u "elastic:$(PASSWORD)" -k "$(ELASTICSEARC_ENDPOINT)/_cluster/health?pretty"
+
+setpassword:
+	kubectl create secret generic quickstart-canary-es-elastic-user -n $(ELASTIC_NAMESPACE) --from-literal=elastic=$(PASSWORD) --dry-run=client -o yaml | kubectl apply -f -

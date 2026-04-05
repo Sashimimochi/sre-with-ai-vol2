@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaos-exporter
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chaos-exporter
+  template:
+    metadata:
+      labels:
+        app: chaos-exporter
+    spec:
+      containers:
+      - name: chaos-exporter
+        image: python:3.9-slim
+        env:
+        - name: PYTHONUNBUFFERED # これを追加
+          value: "1"
+        command: ["/bin/sh", "-c"]
+        args:
+          - pip install prometheus_client && python /config/app.py
+        ports:
+        - containerPort: 8082
+        volumeMounts:
+        - name: script-config
+          mountPath: /config
+      volumes:
+      - name: script-config
+        configMap:
+          name: chaos-script-config
