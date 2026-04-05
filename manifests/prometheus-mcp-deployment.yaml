@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus-mcp
-  namespace: mcp-servers
+  namespace: monitoring
   labels:
     app: prometheus-mcp
 spec:
@@ -17,20 +17,21 @@ spec:
     spec:
       containers:
       - name: mcp-server
-        image: ghcr.io/pab1it0/prometheus-mcp-server:latest
+        image: ghcr.io/pab1it0/prometheus-mcp-server:1.4.2
         ports:
         - name: http
-          containerPort: 8080
+          containerPort: 9000
           protocol: TCP
         env:
         - name: PROMETHEUS_URL
-          value: "http://prometheus-server.monitoring.svc.cluster.local:9090"
+          # kube-prometheus-stack の Helm リリース名 "mon" に対応するサービス名
+          value: "http://mon-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
         - name: PROMETHEUS_MCP_SERVER_TRANSPORT
           value: "http"
         - name: PROMETHEUS_MCP_BIND_HOST
           value: "0.0.0.0"
         - name: PROMETHEUS_MCP_BIND_PORT
-          value: "8080"
+          value: "9000"
         resources:
           requests:
             memory: "128Mi"

@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: chaos-exporter-sm
+  namespace: monitoring
+  labels:
+    # 既存のアラート設定と一致させる
+    prometheus: kube-prometheus
+    release: mon
+spec:
+  selector:
+    matchLabels:
+      app: chaos-exporter # Service側のlabels.appと一致
+  namespaceSelector:
+    matchNames:
+      - monitoring
+  endpoints:
+  - port: metrics # Service側のport名と一致
+    interval: 15s
