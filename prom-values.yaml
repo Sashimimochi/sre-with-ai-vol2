@@ -1,14 +1,30 @@
+prometheus:
+  prometheusSpec:
+    replicas: 1
+    retention: 24h
+    resources:
+      requests:
+        memory: 512Mi
+
 grafana:
   adminPassword: prom-operator
+  replicas: 1
+
 kubeStateMetrics:
   enabled: true
+
 nodeExporter:
   enabled: true
+
 alertmanager:
   enabled: true
   alertmanagerSpec:
     secrets:
       - alertmanager-slack-url
+    replicas: 1
+    resources:
+      requests:
+        memory: 256Mi
   config:
     global:
       resolve_timeout: 5m

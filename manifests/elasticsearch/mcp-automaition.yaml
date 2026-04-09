@@ -1,0 +1,56 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-es-api-key
+  namespace: elastic-system
+spec:
+  template:
+    spec:
+      serviceAccountName: mcp-setup-sa
+      containers:
+      - name: create-key
+        image: bitnami/kubectl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # 1. HTTP に変更 (デバッグ結果に基づき)
+          ES_URL="http://quickstart-es-http.elastic-system.svc.cluster.local:9200"
+
+          echo "Starting connectivity check to $ES_URL ..."
+
+          # 2. 疎通確認 (HTTPなので -k は不要ですが、あっても害はありません)
+          until curl -s "$ES_URL" > /dev/null; do
+            echo "Waiting for Elasticsearch ($ES_URL) to be reachable..."
+            sleep 5
+          done
+
+          echo "Elasticsearch is reachable via HTTP! Generating API Key..."
+
+          # 3. パスワード取得
+          PASSWORD=$(kubectl get secret quickstart-es-elastic-user -n elastic-system -o jsonpath='{.data.elastic}' | base64 -d)
+
+          # 4. APIキー発行 (URLをhttpに変更)
+          RESPONSE=$(curl -s -u "elastic:$PASSWORD" -X POST "$ES_URL/_security/api_key" \
+            -H "Content-Type: application/json" \
+            -d '{"name": "mcp-server-key"}')
+
+          # 5. APIキーの抽出
+          API_KEY=$(echo "$RESPONSE" | grep -oP '"encoded":"\K[^"]+')
+
+          if [ -z "$API_KEY" ]; then
+            echo "Failed to extract API Key. Response: $RESPONSE"
+            exit 1
+          fi
+
+          # 6. Secret を作成
+          echo "apiVersion: v1
+          kind: Secret
+          metadata:
+            name: mcp-api-key
+            namespace: elastic-system
+          stringData:
+            value: $API_KEY" | kubectl apply -f -
+
+          echo "Done! Secret mcp-api-key has been created."
+      restartPolicy: OnFailure

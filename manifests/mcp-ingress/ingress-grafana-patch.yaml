@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mcp-ingress-grafana-debug
+  namespace: mcp
+  annotations:
+    # rewrite-target はあえて外す
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /message
+        pathType: Exact
+        backend:
+          service:
+            name: grafana-mcp
+            port:
+              number: 8081
