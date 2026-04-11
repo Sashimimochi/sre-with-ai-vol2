@@ -18,12 +18,10 @@ spec:
         image: mcp/grafana:latest
         ports:
         - name: http-mcp
-          containerPort: 8000  # 8080から8000に変更
+          containerPort: 8000
         env:
         - name: MCP_PORT
-          value: "8000"        # 念のため8000を明示
-        - name: MCP_PORT
-          value: "8080"  # この環境変数でSSEサーバーが起動します
+          value: "8000"
         - name: GRAFANA_URL
           value: "http://mon-grafana.monitoring.svc.cluster.local"
         - name: GRAFANA_ORG_ID
@@ -35,7 +33,7 @@ spec:
               key: token
         readinessProbe:
           tcpSocket:
-            port: 8000         # 8000に変更
+            port: 8000
         args: []
         resources:
           requests:

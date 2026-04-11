@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elasticsearch-mcp
+  namespace: elastic-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch-mcp
+  template:
+    metadata:
+      labels:
+        app: elasticsearch-mcp
+    spec:
+      containers:
+      - name: mcp-server
+        image: docker.elastic.co/mcp/elasticsearch
+        args: ["http"] # docker-composeと同じ。余計な引数は入れない
+        env:
+        - name: ES_URL
+          value: "http://quickstart-es-http:9200"
+        - name: ES_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: mcp-api-key
+              key: value
+        - name: NODE_TLS_REJECT_UNAUTHORIZED
+          value: "0"
+        ports:
+        - containerPort: 8080 # コンテナ内部は 8080 で待受ける
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch-mcp
+  namespace: elastic-system
+spec:
+  selector:
+    app: elasticsearch-mcp
+  ports:
+    - protocol: TCP
+      port: 8080      # サービスとしてのポート
+      targetPort: 8080 # Podの8080へ転送

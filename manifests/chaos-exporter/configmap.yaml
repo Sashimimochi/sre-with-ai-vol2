@@ -10,14 +10,14 @@ data:
     from prometheus_client import start_http_server, Gauge, Counter
 
     # 既存のメトリクス
-    CPU_USAGE = Gauge('simulated_cpu_usage_percent', 'Simulated CPU usage percentage')
-    MEMORY_USAGE = Gauge('simulated_memory_usage_bytes', 'Simulated Memory usage in bytes')
-    DISK_IO = Gauge('simulated_disk_io_ops', 'Simulated Disk I/O operations per second')
+    CPU_USAGE = Gauge('cpu_usage_percent', 'CPU usage percentage')
+    MEMORY_USAGE = Gauge('memory_usage_bytes', 'Memory usage in bytes')
+    DISK_IO = Gauge('disk_io_ops', 'Disk I/O operations per second')
 
     # 新規追加：HTTPリクエスト（ステータスコード別）とネットワーク帯域
     HTTP_REQUESTS = Counter('http_requests_total', 'Total HTTP requests', ['status', 'method', 'path'])
-    NET_TX = Counter('simulated_network_transmit_bytes_total', 'Simulated network transmit bytes')
-    NET_RX = Counter('simulated_network_receive_bytes_total', 'Simulated network receive bytes')
+    NET_TX = Counter('network_transmit_bytes_total', 'network transmit bytes')
+    NET_RX = Counter('network_receive_bytes_total', 'network receive bytes')
 
     def simulate_behavior():
         step = 0
@@ -41,7 +41,7 @@ data:
 
             # --- フェーズ2: ネットワーク飽和 & HTTPエラー シナリオ (30秒間) ---
             elif 3 <= phase < 6:
-                print("[WARN] Scenario: Network Saturation & HTTP Error Spike")
+                print("[WARN] Network Saturation & HTTP Error Spike")
                 # CPUは微増 (分析結果の0.8->0.9コア相当を15-20%で表現)
                 CPU_USAGE.set(random.uniform(15, 20))
                 # メモリは33%増加 (2.1GB -> 2.8GB付近)
@@ -59,14 +59,14 @@ data:
             else:
                 scenario = random.choice(['cpu_disk_spike', 'oom_error'])
                 if scenario == 'cpu_disk_spike':
-                    print("[WARN] Scenario: High CPU and Disk I/O spike")
+                    print("[WARN] High CPU and Disk I/O spike")
                     CPU_USAGE.set(random.uniform(85, 98))
                     DISK_IO.set(random.uniform(800, 1200))
                 elif scenario == 'oom_error':
-                    print("[ERROR] Scenario: Potential OOM Situation")
+                    print("[ERROR] Potential OOM Situation")
                     MEMORY_USAGE.set(3800 * 1024 * 1024) # 3.8GB
                     CPU_USAGE.set(random.uniform(20, 35))
-                    print("[ERROR] kernel: Out of memory: Kill process 1234 (fake_app)")
+                    print("[ERROR] kernel: Out of memory: Kill process 1234")
 
             step += 1
             time.sleep(10) # 10秒ごとにメトリクス更新
