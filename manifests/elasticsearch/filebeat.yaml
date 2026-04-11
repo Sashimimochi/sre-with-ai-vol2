@@ -26,7 +26,6 @@ spec:
               target_prefix: ""
               overwrite_keys: true
               ignore_failure: true
-
   daemonSet:
     podTemplate:
       spec:
