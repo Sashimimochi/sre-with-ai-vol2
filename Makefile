@@ -1,12 +1,23 @@
-.PHONY: help install install-kubectl install-kind install-helm check-os \
+.PHONY: help check-os \
+        install install-kubectl install-kind install-helm \
         setup teardown teardown-all \
-        setup-monitoring port-forward-monitoring stop-port-forward-monitoring teardown-monitoring \
-        get-grafana-password create-slack-secret \
-        setup-dify port-forward-dify stop-port-forward-dify teardown-dify \
-        setup-mcp port-forward-mcp stop-port-forward-mcp teardown-mcp \
-        setup-elasticsearch port-forward-elasticsearch stop-port-forward-elasticsearch teardown-elasticsearch \
+        port-forward stop-port-forward \
+        setup-monitoring teardown-monitoring \
+        port-forward-monitoring stop-port-forward-monitoring \
+        get-grafana-password create-slack-secret create-grafana-token-secret \
+        setup-dify teardown-dify \
+        port-forward-dify stop-port-forward-dify \
+        setup-mcp teardown-mcp \
+        port-forward-mcp stop-port-forward-mcp \
+        setup-elasticsearch teardown-elasticsearch \
+        port-forward-elasticsearch stop-port-forward-elasticsearch \
+        port-forward-elasticsearch-mcp stop-port-forward-elasticsearch-mcp \
         get-elasticsearch-password healthcheck-elasticsearch setpassword-elasticsearch \
-        port-forward stop-port-forward
+        setup-ingress teardown-ingress ngrok
+
+# ============================================================
+# 変数定義
+# ============================================================
 
 # OSの判定
 UNAME_S := $(shell uname -s)
@@ -14,15 +25,14 @@ UNAME_S := $(shell uname -s)
 # ローカル共有クラスタ名 (すべてのコンポーネントを同じクラスタに収容)
 # クラウド等で別クラスタを使いたい場合は環境変数で上書き可能:
 #   CLUSTER_NAME=my-cluster make setup-monitoring
-CLUSTER_NAME ?= local
-MONITOR_NAMESPACE=monitoring
-PROM_OPER_REL=mon
-ELASTIC_NAMESPACE=elastic-system
-ELASTICSEARCH_ENDPOINT=http://elastic.local
-ELASTIC_OPERATOR_VERSION=3.3.2
+CLUSTER_NAME         ?= local
+MONITOR_NAMESPACE    = monitoring
+PROM_OPER_REL        = mon
+ELASTIC_NAMESPACE    = elastic-system
+ELASTICSEARCH_ENDPOINT = http://elastic.local
+ELASTIC_OPERATOR_VERSION = 3.3.2
 
 # Elasticsearchのパスワードをkubectlから都度取得
-# get-elasticsearch-password / healthcheck-elasticsearch / setpassword-elasticsearch で共用
 ES_PASSWORD = $(shell kubectl get secret quickstart-es-elastic-user \
 	-n $(ELASTIC_NAMESPACE) \
 	-o go-template='{{.data.elastic | base64decode}}' 2>/dev/null)
@@ -56,7 +66,10 @@ define wait-for-pods
 	@echo ""
 endef
 
+# ============================================================
 # デフォルトターゲット
+# ============================================================
+
 help:
 	@echo "SRE自動化ハンドブック Vol.2 セットアップ"
 	@echo ""
@@ -68,48 +81,57 @@ help:
 	@echo "  make check-os        - 現在のOSを確認"
 	@echo ""
 	@echo "汎用コマンド:"
-	@echo "  make setup                 - kindクラスタを作成しすべてのコンポーネントをインストール"
-	@echo "  make port-forward          - すべてのサービスへポートフォワード"
-	@echo "  make stop-port-forward     - すべてのポートフォワードを停止"
-	@echo "  make teardown              - すべてのコンポーネントとkindクラスタを削除 (teardown-allの別名)"
+	@echo "  make setup             - kindクラスタを作成しすべてのコンポーネントをインストール"
+	@echo "  make port-forward      - すべてのサービスへポートフォワード"
+	@echo "  make stop-port-forward - すべてのポートフォワードを停止"
+	@echo "  make teardown          - すべてのポートフォワードを停止してkindクラスタを削除"
 	@echo ""
-	@echo "Prometheus 監視環境:"
+	@echo "Prometheus 監視環境 (namespace: $(MONITOR_NAMESPACE)):"
 	@echo "  make setup-monitoring             - kindクラスタを作成しPrometheus/Grafana/Alertmanagerをインストール"
-	@echo "  make create-slack-secret          - .envのWebhook URLをKubernetes Secretに登録"
+	@echo "  make teardown-monitoring          - 監視コンポーネントを削除 (クラスタは維持)"
 	@echo "  make port-forward-monitoring      - Prometheus(9090)、Grafana(3000)、Alertmanager(9093)へポートフォワード"
 	@echo "  make stop-port-forward-monitoring - 監視系ポートフォワードを停止"
-	@echo "  make teardown-monitoring          - 監視コンポーネントを削除 (クラスタは維持)"
+	@echo "  make create-slack-secret          - .envのWebhook URLをKubernetes Secretに登録"
 	@echo "  make get-grafana-password         - GrafanaのAdminパスワードを取得"
 	@echo ""
 	@echo "Dify 環境:"
 	@echo "  make setup-dify             - kindクラスタを作成しDifyをインストール"
+	@echo "  make teardown-dify          - Difyコンポーネントを削除 (クラスタは維持)"
 	@echo "  make port-forward-dify      - Dify Web UI(8080)へポートフォワード"
 	@echo "  make stop-port-forward-dify - Difyのポートフォワードを停止"
-	@echo "  make teardown-dify          - Difyコンポーネントを削除 (クラスタは維持)"
 	@echo ""
-	@echo "Prometheus MCP サーバー:"
-	@echo "  make setup-mcp             - Prometheus / Grafana MCPサーバーをデプロイ (monitoring namespace)"
+	@echo "MCP サーバー (namespace: $(MONITOR_NAMESPACE)):"
+	@echo "  make setup-mcp             - Prometheus / Grafana MCPサーバーをデプロイ"
+	@echo "  make teardown-mcp          - MCPサーバーを削除 (クラスタは維持)"
 	@echo "  make port-forward-mcp      - Prometheus MCP(9000)、Grafana MCP(8081)へポートフォワード"
 	@echo "  make stop-port-forward-mcp - MCPサーバーのポートフォワードを停止"
-	@echo "  make teardown-mcp          - MCPサーバーを削除 (クラスタは維持)"
 	@echo ""
-	@echo "Elasticsearch 環境:"
+	@echo "Elasticsearch 環境 (namespace: $(ELASTIC_NAMESPACE)):"
 	@echo "  make setup-elasticsearch              - ingress-nginx / ECK Operator / Elasticsearch / Exporterをインストール"
-	@echo "  make port-forward-elasticsearch       - Elasticsearch REST API(9200)へポートフォワード"
-	@echo "  make stop-port-forward-elasticsearch  - Elasticsearchのポートフォワードを停止"
 	@echo "  make teardown-elasticsearch           - Elasticsearch関連リソースをすべて削除 (クラスタは維持)"
+	@echo "  make port-forward-elasticsearch       - Elasticsearch REST API(9200)、Kibana(5601)へポートフォワード"
+	@echo "  make stop-port-forward-elasticsearch  - Elasticsearchのポートフォワードを停止"
+	@echo "  make port-forward-elasticsearch-mcp   - Elasticsearch MCP(8085)へポートフォワード"
+	@echo "  make stop-port-forward-elasticsearch-mcp - Elasticsearch MCPのポートフォワードを停止"
 	@echo "  make get-elasticsearch-password       - ElasticsearchのAdminパスワードを取得"
 	@echo "  make healthcheck-elasticsearch        - Elasticsearchのクラスタヘルスを確認"
 	@echo "  make setpassword-elasticsearch        - パスワードをcanary用Secretに登録"
 	@echo ""
+	@echo "MCP Ingress / ngrok 公開:"
+	@echo "  make setup-ingress   - MCP Ingressリソースをデプロイ"
+	@echo "  make teardown-ingress - MCP Ingressリソースを削除"
+	@echo "  make ngrok           - ngrokでポート80を公開"
+	@echo ""
 	@echo "クラスタ管理:"
-	@echo "  make teardown-all          - すべてのポートフォワードを停止してkindクラスタを削除"
+	@echo "  make teardown-all    - すべてのポートフォワードを停止してkindクラスタを削除"
 	@echo ""
 	@echo "共有クラスタ名: $(CLUSTER_NAME)  (CLUSTER_NAME=<名前> で上書き可能)"
-	@echo ""
-	@echo "検出されたOS: $(UNAME_S)"
+	@echo "検出されたOS:   $(UNAME_S)"
 
-# OSの確認
+# ============================================================
+# OS確認 / ツールインストール
+# ============================================================
+
 check-os:
 	@echo "検出されたOS: $(UNAME_S)"
 ifeq ($(UNAME_S),Darwin)
@@ -131,7 +153,6 @@ install: install-kubectl install-kind install-helm
 	@helm version 2>/dev/null || echo "helm: インストール確認に失敗"
 
 # kubectlのインストール
-# Kubernetes公式ドキュメントの推奨インストール方法を使用
 # https://kubernetes.io/docs/tasks/tools/
 install-kubectl:
 	@echo "kubectlをインストールしています..."
@@ -162,7 +183,6 @@ else
 endif
 
 # kindのインストール
-# kind公式ドキュメントの推奨インストール方法を使用
 # https://kind.sigs.k8s.io/docs/user/quick-start/
 install-kind:
 	@echo "kindをインストールしています..."
@@ -192,7 +212,6 @@ else
 endif
 
 # helmのインストール
-# Helm公式ドキュメントの推奨インストール方法を使用
 # https://helm.sh/docs/intro/install/
 install-helm:
 	@echo "helmをインストールしています..."
@@ -223,20 +242,6 @@ endif
 # Prometheus 監視環境
 # ============================================================
 
-# Slack Webhook URLをKubernetes Secretに登録
-create-slack-secret:
-	@if [ ! -f .env ]; then \
-		echo "エラー: .envファイルが見つかりません。.env.exampleを参考に作成してください"; \
-		exit 1; \
-	fi
-	@echo "Slack Webhook URLをSecretに登録しています..."
-	kubectl create secret generic alertmanager-slack-url \
-		--from-env-file=.env \
-		--namespace monitoring \
-		--dry-run=client -o yaml | kubectl apply -f -
-	@echo "✓ Secretの登録が完了しました"
-
-# kindクラスタの作成とPrometheus/Grafana/Alertmanagerのインストール
 setup-monitoring:
 	$(call create-kind-cluster,$(CLUSTER_NAME))
 	@echo "Helmリポジトリを登録・更新しています..."
@@ -245,8 +250,8 @@ setup-monitoring:
 	helm repo update
 	@echo ""
 	@echo "Prometheus / Grafana / Alertmanager をインストールしています..."
-	helm upgrade --install mon prometheus-community/kube-prometheus-stack \
-		--namespace monitoring \
+	helm upgrade --install $(PROM_OPER_REL) prometheus-community/kube-prometheus-stack \
+		--namespace $(MONITOR_NAMESPACE) \
 		--create-namespace \
 		-f prom-values.yaml
 	@echo ""
@@ -256,22 +261,31 @@ setup-monitoring:
 	@echo "Operator / Grafana / Alertmanager / Exporterの起動を待っています (タイムアウト: 15分)..."
 	kubectl wait --for=condition=Ready pod \
 		-l 'app.kubernetes.io/managed-by=Helm' \
-		-n monitoring --timeout=900s
+		-n $(MONITOR_NAMESPACE) --timeout=900s
 	@echo "PrometheusのStatefulSet Podの起動を待っています (タイムアウト: 15分)..."
 	kubectl wait --for=condition=Ready pod \
-		-l 'operator.prometheus.io/name=mon-kube-prometheus-stack-prometheus' \
-		-n monitoring --timeout=900s
+		-l 'operator.prometheus.io/name=$(PROM_OPER_REL)-kube-prometheus-stack-prometheus' \
+		-n $(MONITOR_NAMESPACE) --timeout=900s
 	@echo ""
 	$(MAKE) create-slack-secret
 
-# Prometheus / Grafana / Alertmanager へのポートフォワードを設定
+teardown-monitoring: stop-port-forward-monitoring
+	@echo "監視コンポーネントを削除しています..."
+	helm uninstall $(PROM_OPER_REL) --namespace $(MONITOR_NAMESPACE) 2>/dev/null \
+		|| echo "監視用Helmリリース ($(PROM_OPER_REL)) が見つかりませんでした"
+	kubectl delete namespace $(MONITOR_NAMESPACE) --ignore-not-found=true
+	@echo "✓ 監視コンポーネントの削除が完了しました (クラスタは維持されています)"
+
 port-forward-monitoring:
 	@echo "Prometheusへのポートフォワードを設定しています (http://localhost:9090)..."
-	kubectl port-forward svc/mon-kube-prometheus-stack-prometheus 9090:9090 -n monitoring &
+	kubectl port-forward svc/$(PROM_OPER_REL)-kube-prometheus-stack-prometheus \
+		9090:9090 -n $(MONITOR_NAMESPACE) &
 	@echo "Grafanaへのポートフォワードを設定しています (http://localhost:3000)..."
-	kubectl port-forward svc/mon-grafana 3000:80 -n monitoring &
+	kubectl port-forward svc/$(PROM_OPER_REL)-grafana \
+		3000:80 -n $(MONITOR_NAMESPACE) &
 	@echo "Alertmanagerへのポートフォワードを設定しています (http://localhost:9093)..."
-	kubectl port-forward svc/mon-kube-prometheus-stack-alertmanager 9093:9093 -n monitoring &
+	kubectl port-forward svc/$(PROM_OPER_REL)-kube-prometheus-stack-alertmanager \
+		9093:9093 -n $(MONITOR_NAMESPACE) &
 	@echo ""
 	@echo "✓ ポートフォワードの設定が完了しました"
 	@echo "  Prometheus:    http://localhost:9090"
@@ -280,28 +294,35 @@ port-forward-monitoring:
 	@echo ""
 	@echo "ポートフォワードを停止するには: make stop-port-forward-monitoring"
 
-# 監視系ポートフォワードを停止
 stop-port-forward-monitoring:
 	@echo "監視系ポートフォワードを停止しています..."
-	@pkill -f "kubectl port-forward svc/mon-" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
+	@pkill -f "kubectl port-forward svc/$(PROM_OPER_REL)-" 2>/dev/null \
+		&& echo "✓ ポートフォワードを停止しました" \
+		|| echo "停止対象のポートフォワードが見つかりませんでした"
 
-# 監視コンポーネントを削除 (クラスタは維持)
-teardown-monitoring: stop-port-forward-monitoring
-	@echo "監視コンポーネントを削除しています..."
-	helm uninstall mon --namespace monitoring 2>/dev/null || echo "監視用Helmリリース (mon) が見つかりませんでした"
-	kubectl delete namespace monitoring --ignore-not-found=true
-	@echo "✓ 監視コンポーネントの削除が完了しました (クラスタは維持されています)"
+# Slack Webhook URLをKubernetes Secretに登録
+create-slack-secret:
+	@if [ ! -f .env ]; then \
+		echo "エラー: .envファイルが見つかりません。.env.exampleを参考に作成してください"; \
+		exit 1; \
+	fi
+	@echo "Slack Webhook URLをSecretに登録しています..."
+	kubectl create secret generic alertmanager-slack-url \
+		--from-env-file=.env \
+		--namespace $(MONITOR_NAMESPACE) \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "✓ Secretの登録が完了しました"
 
-# GrafanaのAdminパスワードを取得
 get-grafana-password:
 	@echo "GrafanaのAdminパスワードを取得しています..."
-	@kubectl get secret mon-grafana -n monitoring -o json | jq -r '.data."admin-password"' | base64 --decode ; echo
+	@kubectl get secret $(PROM_OPER_REL)-grafana \
+		-n $(MONITOR_NAMESPACE) \
+		-o json | jq -r '.data."admin-password"' | base64 --decode ; echo
 
 # ============================================================
 # Dify 環境
 # ============================================================
 
-# kindクラスタの作成とDifyのインストール
 setup-dify:
 	$(call create-kind-cluster,$(CLUSTER_NAME))
 	@echo "Helmリポジトリを登録・更新しています..."
@@ -317,7 +338,13 @@ setup-dify:
 	@echo "✓ インストールが完了しました"
 	$(call wait-for-pods,dify)
 
-# Dify へのポートフォワードを設定
+teardown-dify: stop-port-forward-dify
+	@echo "Difyコンポーネントを削除しています..."
+	helm uninstall dify --namespace dify 2>/dev/null \
+		|| echo "Dify用Helmリリース (dify) が見つかりませんでした"
+	kubectl delete namespace dify --ignore-not-found=true
+	@echo "✓ Difyコンポーネントの削除が完了しました (クラスタは維持されています)"
+
 port-forward-dify:
 	@echo "Dify Web UIへのポートフォワードを設定しています (http://localhost:8080)..."
 	kubectl port-forward -n dify svc/dify 8080:80 &
@@ -327,20 +354,14 @@ port-forward-dify:
 	@echo ""
 	@echo "ポートフォワードを停止するには: make stop-port-forward-dify"
 
-# Dify のポートフォワードを停止
 stop-port-forward-dify:
 	@echo "Dify のポートフォワードを停止しています..."
-	@pkill -f "kubectl port-forward.*svc/dify" 2>/dev/null && echo "✓ ポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした"
-
-# Dify コンポーネントを削除 (クラスタは維持)
-teardown-dify: stop-port-forward-dify
-	@echo "Difyコンポーネントを削除しています..."
-	helm uninstall dify --namespace dify 2>/dev/null || echo "Dify用Helmリリース (dify) が見つかりませんでした"
-	kubectl delete namespace dify --ignore-not-found=true
-	@echo "✓ Difyコンポーネントの削除が完了しました (クラスタは維持されています)"
+	@pkill -f "kubectl port-forward.*svc/dify" 2>/dev/null \
+		&& echo "✓ ポートフォワードを停止しました" \
+		|| echo "停止対象のポートフォワードが見つかりませんでした"
 
 # ============================================================
-# Prometheus MCP サーバー
+# MCP サーバー
 # ============================================================
 
 # Grafana Service Accountを作成し、トークンをSecretに登録
@@ -359,14 +380,18 @@ create-grafana-token-secret:
 	@echo "✓ Grafanaの応答を確認しました"
 
 	@# 2. パスワード取得とトークン生成
-	@GRAFANA_PASS=$$(kubectl get secret mon-grafana -n monitoring -o json | jq -r '.data."admin-password"' | base64 --decode); \
+	@GRAFANA_PASS=$$(kubectl get secret $(PROM_OPER_REL)-grafana \
+		-n $(MONITOR_NAMESPACE) \
+		-o json | jq -r '.data."admin-password"' | base64 --decode); \
 	echo "Grafana Service Accountを作成しています..."; \
 	curl -s -X POST -H "Content-Type: application/json" \
 		-u "admin:$$GRAFANA_PASS" \
 		-d '{"name":"mcp-sa", "role": "Admin"}' \
 		http://localhost:3000/api/serviceaccounts > /dev/null || true; \
 	\
-	SA_ID=$$(curl -s -u "admin:$$GRAFANA_PASS" http://localhost:3000/api/serviceaccounts/search?query=mcp-sa | jq -r '.serviceAccounts[0].id'); \
+	SA_ID=$$(curl -s -u "admin:$$GRAFANA_PASS" \
+		http://localhost:3000/api/serviceaccounts/search?query=mcp-sa \
+		| jq -r '.serviceAccounts[0].id'); \
 	if [ "$$SA_ID" = "null" ] || [ -z "$$SA_ID" ]; then \
 		echo "エラー: Service Account IDの取得に失敗しました"; \
 		exit 1; \
@@ -384,12 +409,11 @@ create-grafana-token-secret:
 	fi; \
 	\
 	kubectl create secret generic grafana-api-token \
-		--namespace monitoring \
+		--namespace $(MONITOR_NAMESPACE) \
 		--from-literal=token=$$TOKEN \
 		--dry-run=client -o yaml | kubectl apply -f -
 	@echo "✓ Secret 'grafana-api-token' を更新しました"
 
-# Prometheus / Grafana MCPサーバーのデプロイ (monitoring namespace に統合)
 setup-mcp:
 	@$(MAKE) port-forward-monitoring
 	@$(MAKE) create-grafana-token-secret
@@ -401,7 +425,7 @@ setup-mcp:
 	@echo "Prometheus MCP Podの起動を待っています (タイムアウト: 5分)..."
 	kubectl wait --for=condition=Ready pod \
 		-l app=prometheus-mcp \
-		-n monitoring --timeout=300s
+		-n $(MONITOR_NAMESPACE) --timeout=300s
 	@echo ""
 	@echo "Grafana MCP サーバーをデプロイしています..."
 	kubectl apply -f manifests/prometheus/grafana-mcp-deployment.yaml
@@ -410,29 +434,9 @@ setup-mcp:
 	@echo "Grafana MCP Podの起動を待っています (タイムアウト: 5分)..."
 	kubectl wait --for=condition=Ready pod \
 		-l app=grafana-mcp \
-		-n monitoring --timeout=300s
+		-n $(MONITOR_NAMESPACE) --timeout=300s
 	@echo ""
 
-# Prometheus / Grafana MCPサーバーへのポートフォワードを設定
-port-forward-prom-mcp:
-	@echo "Prometheus MCPサーバーへのポートフォワードを設定しています (http://localhost:9000)..."
-	kubectl port-forward svc/prometheus-mcp 9000:9000 -n monitoring &
-	@echo "Grafana MCPサーバーへのポートフォワードを設定しています (http://localhost:8081)..."
-	kubectl port-forward svc/grafana-mcp 8081:8081 -n monitoring &
-	@echo ""
-	@echo "✓ ポートフォワードの設定が完了しました"
-	@echo "  Prometheus MCP: http://localhost:9000/mcp"
-	@echo "  Grafana MCP:    http://localhost:8081/mcp"
-	@echo ""
-	@echo "ポートフォワードを停止するには: make stop-port-forward-mcp"
-
-# Prometheus / Grafana MCPサーバーのポートフォワードを停止
-stop-port-forward-mcp:
-	@echo "MCP サーバーのポートフォワードを停止しています..."
-	@pkill -f "kubectl port-forward svc/prometheus-mcp" 2>/dev/null && echo "✓ Prometheus MCP のポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした (prometheus-mcp)"
-	@pkill -f "kubectl port-forward svc/grafana-mcp" 2>/dev/null && echo "✓ Grafana MCP のポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした (grafana-mcp)"
-
-# MCP サーバーを削除 (クラスタは維持)
 teardown-mcp: stop-port-forward-mcp
 	@echo "Prometheus MCP サーバーを削除しています..."
 	kubectl delete -f manifests/prometheus/prometheus-mcp-service.yaml --ignore-not-found=true
@@ -443,11 +447,31 @@ teardown-mcp: stop-port-forward-mcp
 	kubectl delete -f manifests/prometheus/grafana-mcp-deployment.yaml --ignore-not-found=true
 	@echo "✓ Grafana MCP サーバーの削除が完了しました"
 
+port-forward-mcp:
+	@echo "Prometheus MCPサーバーへのポートフォワードを設定しています (http://localhost:9000)..."
+	kubectl port-forward svc/prometheus-mcp 9000:9000 -n $(MONITOR_NAMESPACE) &
+	@echo "Grafana MCPサーバーへのポートフォワードを設定しています (http://localhost:8081)..."
+	kubectl port-forward svc/grafana-mcp 8081:8081 -n $(MONITOR_NAMESPACE) &
+	@echo ""
+	@echo "✓ ポートフォワードの設定が完了しました"
+	@echo "  Prometheus MCP: http://localhost:9000/mcp"
+	@echo "  Grafana MCP:    http://localhost:8081/mcp"
+	@echo ""
+	@echo "ポートフォワードを停止するには: make stop-port-forward-mcp"
+
+stop-port-forward-mcp:
+	@echo "MCP サーバーのポートフォワードを停止しています..."
+	@pkill -f "kubectl port-forward svc/prometheus-mcp" 2>/dev/null \
+		&& echo "✓ Prometheus MCP のポートフォワードを停止しました" \
+		|| echo "停止対象のポートフォワードが見つかりませんでした (prometheus-mcp)"
+	@pkill -f "kubectl port-forward svc/grafana-mcp" 2>/dev/null \
+		&& echo "✓ Grafana MCP のポートフォワードを停止しました" \
+		|| echo "停止対象のポートフォワードが見つかりませんでした (grafana-mcp)"
+
 # ============================================================
 # Elasticsearch 環境
 # ============================================================
 
-# ingress-nginx / ECK Operator / Elasticsearch クラスタ / Exporter をインストール
 setup-elasticsearch:
 	$(call create-kind-cluster,$(CLUSTER_NAME))
 	@echo "Helmリポジトリを登録・更新しています..."
@@ -501,7 +525,21 @@ setup-elasticsearch:
 		-n $(ELASTIC_NAMESPACE)
 	@echo "✓ Elasticsearch Exporter のインストールが完了しました"
 
-# Elasticsearch REST API へのポートフォワードを設定
+teardown-elasticsearch: stop-port-forward-elasticsearch stop-port-forward-elasticsearch-mcp
+	@echo "Elasticsearch Exporter を削除しています..."
+	helm uninstall elastic-exporter -n $(ELASTIC_NAMESPACE) 2>/dev/null \
+		|| echo "elastic-exporter が見つかりませんでした"
+	@echo "Fluentd を削除しています..."
+	helm uninstall fluentd 2>/dev/null \
+		|| echo "fluentd が見つかりませんでした"
+	@echo "Elasticsearch リソースを削除しています..."
+	kubectl delete -f manifests/elasticsearch/ --ignore-not-found=true
+	@echo "ECK Operator を削除しています..."
+	helm uninstall elastic-operator -n $(ELASTIC_NAMESPACE) 2>/dev/null \
+		|| echo "ECK Operator が見つかりませんでした"
+	kubectl delete namespace $(ELASTIC_NAMESPACE) --ignore-not-found=true
+	@echo "✓ Elasticsearch 関連リソースの削除が完了しました (クラスタは維持されています)"
+
 port-forward-elasticsearch:
 	@echo "Elasticsearch REST APIへのポートフォワードを設定しています (https://localhost:9200)..."
 	kubectl port-forward svc/quickstart-es-http 9200:9200 -n $(ELASTIC_NAMESPACE) &
@@ -509,12 +547,20 @@ port-forward-elasticsearch:
 	@echo ""
 	@echo "✓ ポートフォワードの設定が完了しました"
 	@echo "  Elasticsearch: https://localhost:9200"
-	@echo "  Kibana: https://localhost:5601"
+	@echo "  Kibana:        https://localhost:5601"
 	@echo "  ヘルスチェック: make healthcheck-elasticsearch"
 	@echo ""
 	@echo "ポートフォワードを停止するには: make stop-port-forward-elasticsearch"
 
-# Elasticsearch MCPサーバーへのポートフォワードを設定
+stop-port-forward-elasticsearch:
+	@echo "Elasticsearch のポートフォワードを停止しています..."
+	@pkill -f "kubectl port-forward svc/quickstart-es-http 9200" 2>/dev/null \
+		&& echo "✓ Elasticsearchのポートフォワードを停止しました" \
+		|| echo "停止対象のポートフォワードが見つかりませんでした (Elasticsearch)"
+	@pkill -f "kubectl port-forward svc/my-kibana-kb-http 5601" 2>/dev/null \
+		&& echo "✓ Kibanaのポートフォワードを停止しました" \
+		|| echo "停止対象のポートフォワードが見つかりませんでした (Kibana)"
+
 port-forward-elasticsearch-mcp:
 	@echo "Elasticsearch MCPサーバーへのポートフォワードを設定しています (http://localhost:8085)..."
 	kubectl port-forward svc/elasticsearch-mcp 8085:8080 -n $(ELASTIC_NAMESPACE) &
@@ -524,40 +570,20 @@ port-forward-elasticsearch-mcp:
 	@echo ""
 	@echo "ポートフォワードを停止するには: make stop-port-forward-elasticsearch-mcp"
 
-# Elasticsearch のポートフォワードを停止
-stop-port-forward-elasticsearch:
-	@echo "Elasticsearch のポートフォワードを停止しています..."
-	@pkill -f "kubectl port-forward svc/quickstart-es-http 9200" 2>/dev/null && echo "✓ Elasticsearchのポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした (Elasticsearch)"
-	@pkill -f "kubectl port-forward svc/my-kibana-kb-http 5601" 2>/dev/null && echo "✓ Kibanaのポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした (Kibana)"
-
 stop-port-forward-elasticsearch-mcp:
 	@echo "Elasticsearch MCPサーバーのポートフォワードを停止しています..."
-	@pkill -f "kubectl port-forward svc/elasticsearch-mcp 8085" 2>/dev/null && echo "✓ Elasticsearch MCPのポートフォワードを停止しました" || echo "停止対象のポートフォワードが見つかりませんでした (Elasticsearch MCP)"
+	@pkill -f "kubectl port-forward svc/elasticsearch-mcp 8085" 2>/dev/null \
+		&& echo "✓ Elasticsearch MCPのポートフォワードを停止しました" \
+		|| echo "停止対象のポートフォワードが見つかりませんでした (Elasticsearch MCP)"
 
-# Elasticsearch 関連リソースをすべて削除 (クラスタは維持)
-teardown-elasticsearch: stop-port-forward-elasticsearch stop-port-forward-elasticsearch-mcp
-	@echo "Elasticsearch Exporter を削除しています..."
-	helm uninstall elastic-exporter -n $(ELASTIC_NAMESPACE) 2>/dev/null || echo "elastic-exporter が見つかりませんでした"
-	@echo "Fluentd を削除しています..."
-	helm uninstall fluentd 2>/dev/null || echo "fluentd が見つかりませんでした"
-	@echo "Elasticsearch リソースを削除しています..."
-	kubectl delete -f manifests/elasticsearch/ --ignore-not-found=true
-	@echo "ECK Operator を削除しています..."
-	helm uninstall elastic-operator -n $(ELASTIC_NAMESPACE) 2>/dev/null || echo "ECK Operator が見つかりませんでした"
-	kubectl delete namespace $(ELASTIC_NAMESPACE) --ignore-not-found=true
-	@echo "✓ Elasticsearch 関連リソースの削除が完了しました (クラスタは維持されています)"
-
-# ElasticsearchのAdminパスワードを取得
 get-elasticsearch-password:
 	@echo "Elasticsearchのパスワードを取得しています..."
 	@echo "$(ES_PASSWORD)"
 
-# Elasticsearchのクラスタヘルスを確認
 healthcheck-elasticsearch:
 	@echo "Elasticsearchのクラスタヘルスを確認しています..."
 	curl -u "elastic:$(ES_PASSWORD)" -k "$(ELASTICSEARCH_ENDPOINT)/_cluster/health?pretty"
 
-# パスワードを canary 用 Secret に登録
 setpassword-elasticsearch:
 	@echo "Elasticsearchのパスワードを canary 用 Secret に登録しています..."
 	kubectl create secret generic quickstart-canary-es-elastic-user \
@@ -567,10 +593,10 @@ setpassword-elasticsearch:
 	@echo "✓ Secretの登録が完了しました"
 
 # ============================================================
-# MCP Ingress (ngrok公開用)
+# MCP Ingress / ngrok 公開
 # ============================================================
 
-setup-mcp-ingress:
+setup-ingress:
 	@echo "MCP Ingress をセットアップしています..."
 	kubectl apply -f manifests/mcp-ingress/namespace.yaml
 	kubectl apply -f manifests/mcp-ingress/external-services.yaml
@@ -578,15 +604,15 @@ setup-mcp-ingress:
 	kubectl apply -f manifests/mcp-ingress/ingress-grafana-patch.yaml
 	@echo "✓ MCP Ingress のセットアップが完了しました"
 	@echo "  エンドポイント (ngrok URL に置き換えてください):"
-	@echo "  Prometheus MCP:     https://<ngrok-url>/mcp/prometheus/mcp"
-	@echo "  Grafana MCP:        https://<ngrok-url>/mcp/grafana/mcp"
-	@echo "  Elasticsearch MCP:  https://<ngrok-url>/mcp/elastic/mcp"
+	@echo "  Prometheus MCP:    https://<ngrok-url>/mcp/prometheus/mcp"
+	@echo "  Grafana MCP:       https://<ngrok-url>/mcp/grafana/mcp"
+	@echo "  Elasticsearch MCP: https://<ngrok-url>/mcp/elastic/mcp"
 
-teardown-mcp-ingress:
+teardown-ingress:
 	kubectl delete -f manifests/mcp-ingress/ --ignore-not-found=true
 	@echo "✓ MCP Ingress を削除しました"
 
-ngrok-mcp:
+ngrok:
 	@echo "ngrok を起動しています (ポート 80)..."
 	@echo "起動後に表示されるURLを各MCPクライアントに設定してください"
 	ngrok http 8080
@@ -599,23 +625,33 @@ ngrok-mcp:
 setup: setup-monitoring setup-dify setup-mcp setup-elasticsearch
 
 # すべてのサービスへのポートフォワードを一度に設定する
-port-forward: port-forward-monitoring port-forward-dify port-forward-mcp port-forward-elasticsearch port-forward-elasticsearch-mcp
+port-forward: \
+		port-forward-monitoring \
+		port-forward-dify \
+		port-forward-mcp \
+		port-forward-elasticsearch \
+		port-forward-elasticsearch-mcp
 	@echo ""
 	@echo "✓ すべてのポートフォワードの設定が完了しました"
-	@echo "  Prometheus:      http://localhost:9090"
-	@echo "  Grafana:         http://localhost:3000  (デフォルト: admin / prom-operator)"
-	@echo "  Alertmanager:    http://localhost:9093"
-	@echo "  Dify Web UI:     http://localhost:8080"
-	@echo "  Prometheus MCP:  http://localhost:9000/mcp"
-	@echo "  Grafana MCP:     http://localhost:8081/mcp"
-	@echo "  Elasticsearch:   https://localhost:9200"
-	@echo "  Kibana:          https://localhost:5601"
-	@echo "  Elasticsearch MCP: http://localhost:8085"
+	@echo "  Prometheus:        http://localhost:9090"
+	@echo "  Grafana:           http://localhost:3000  (デフォルト: admin / prom-operator)"
+	@echo "  Alertmanager:      http://localhost:9093"
+	@echo "  Dify Web UI:       http://localhost:8080"
+	@echo "  Prometheus MCP:    http://localhost:9000/mcp"
+	@echo "  Grafana MCP:       http://localhost:8081/mcp"
+	@echo "  Elasticsearch:     https://localhost:9200"
+	@echo "  Kibana:            https://localhost:5601"
+	@echo "  Elasticsearch MCP: http://localhost:8085/mcp"
 	@echo ""
 	@echo "ポートフォワードを停止するには: make stop-port-forward"
 
 # すべてのポートフォワードを停止する
-stop-port-forward: stop-port-forward-monitoring stop-port-forward-dify stop-port-forward-mcp stop-port-forward-elasticsearch stop-port-forward-elasticsearch-mcp
+stop-port-forward: \
+		stop-port-forward-monitoring \
+		stop-port-forward-dify \
+		stop-port-forward-mcp \
+		stop-port-forward-elasticsearch \
+		stop-port-forward-elasticsearch-mcp
 
 # クラスタ全体を削除する (すべてのポートフォワードを停止してからクラスタを削除)
 teardown-all: stop-port-forward
